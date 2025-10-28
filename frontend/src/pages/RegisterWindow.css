@@ -1,0 +1,254 @@
+.register-container {
+  display: flex;
+  max-width: 900px;
+  width: 90%;
+  margin: 0 auto;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background: white;
+  border-radius: 15px;
+  box-shadow: 0 3px 15px rgb(0 0 0 / 0.1);
+  overflow: hidden;
+  align-items: stretch;
+  min-height: 500px;
+  max-height: 600px;
+  height: auto;
+  position: relative; /* Добавляем для позиционирования кнопки */
+}
+
+.home-button {
+  position: absolute;
+  top: 10px; /* Уменьшаем отступ сверху */
+  left: 10px; /* Уменьшаем отступ слева */
+  padding: 8px 12px; /* Уменьшаем padding */
+  background-color: #f0f0f0;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px; /* Уменьшаем размер шрифта */
+  font-weight: 500;
+  color: #333;
+  transition: all 0.2s ease;
+  z-index: 1001;
+}
+
+.home-button:hover {
+  background-color: #e0e0e0;
+  border-color: #ccc;
+}
+
+.home-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.register-info {
+  flex: 1;
+  padding: 30px;
+  color: #424242;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: #fff;
+  overflow-y: auto;
+}
+
+.register-info h1 {
+  font-size: 2.2rem;
+  color: #7c3aed;
+  margin-bottom: 10px;
+}
+
+.register-info p {
+  font-size: 1rem;
+  margin-bottom: 20px;
+  text-align: center;
+  max-width: 250px;
+}
+
+.register-image {
+  width: 300px;
+  height: 200px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  box-shadow: 0 0 30px 10px rgba(0, 0, 0, 0.15);
+  object-fit: cover;
+}
+
+.features {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.feature {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 16px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
+  cursor: default;
+  min-width: 140px;
+}
+
+.feature h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #311b92;
+}
+
+.feature p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #616161;
+}
+
+.register-form {
+  flex: 1;
+  background: #f6f6f8;
+  color: #222;
+  padding: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  justify-content: center;
+  border-radius: 0 15px 15px 0;
+  overflow-y: auto;
+}
+
+.register-form h2 {
+  color: #222222;
+  font-size: 1.5rem;
+  margin-bottom: 5px;
+}
+
+.register-form p {
+  color: #666;
+  font-size: 0.9rem;
+  margin-bottom: 10px;
+}
+
+.register-form label {
+  color: #222222;
+  font-size: 0.85rem;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.register-form input {
+  background: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #222;
+  font-size: 0.9rem;
+  height: 40px;
+}
+
+.register-form input::placeholder {
+  color: #9e9e9e;
+  font-size: 0.9rem;
+}
+
+.register-form button {
+  margin-top: 15px;
+  padding: 10px;
+  font-weight: 600;
+  background: #fb927f;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  color: white;
+  font-size: 1rem;
+  height: 45px;
+  transition: background 0.3s ease;
+}
+
+.register-form button:hover {
+  background: #f68c7e;
+}
+
+.login-hint {
+  margin-top: 12px;
+  font-size: 0.85rem;
+  color: black;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.login-link {
+  color: rgb(99, 99, 100);
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.3s ease;
+  font-size: 0.85rem;
+}
+
+.login-link:hover {
+  color: purple;
+}
+
+.error {
+  border-color: #ff4444 !important;
+}
+
+.error-text {
+  color: #ff4444;
+  font-size: 12px;
+  margin-top: 4px;
+  display: block;
+}
+
+.submit-error {
+  text-align: center;
+  margin-bottom: 15px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Адаптивность для мобильных */
+@media (max-width: 768px) {
+  .register-container {
+    flex-direction: column;
+    max-height: none;
+    min-height: auto;
+  }
+  
+  .home-button {
+    top: 8px;
+    left: 8px;
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+  
+  .register-info {
+    padding: 20px;
+  }
+  
+  .register-form {
+    border-radius: 0 0 15px 15px;
+    padding: 20px;
+  }
+  
+  .register-image {
+    width: 250px;
+    height: 160px;
+  }
+  
+  .features {
+    gap: 15px;
+  }
+  
+  .feature {
+    padding: 6px 12px;
+    min-width: 120px;
+  }
+}
