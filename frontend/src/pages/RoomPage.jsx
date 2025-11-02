@@ -17,7 +17,7 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
       const token = localStorage.getItem('token');
       console.log('🔄 Загружаем данные комнаты:', roomCode);
       
-      const response = await fetch(`http://localhost:5000/api/game/${roomCode}`, {
+      const response = await fetch(`api/game/${roomCode}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -114,7 +114,7 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
       const token = localStorage.getItem('token');
       console.log('🔄 Изменяем статус готовности для комнаты:', roomCode);
       
-      const response = await fetch(`http://localhost:5000/api/game/${roomCode}/ready`, {
+      const response = await fetch(`/api/game/${roomCode}/ready`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -152,7 +152,7 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
       const token = localStorage.getItem('token');
       console.log('🎮 Начинаем игру для комнаты:', roomCode);
       
-      const response = await fetch(`http://localhost:5000/api/game/${roomCode}/start`, {
+      const response = await fetch(`/api/game/${roomCode}/start`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
