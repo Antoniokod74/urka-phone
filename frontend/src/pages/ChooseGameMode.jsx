@@ -7,9 +7,9 @@ import { useNavigate } from 'react-router-dom';
 const gameModes = [
   {
     id: "classic",
-    title: "Классический Gartic Phone",
+    title: "Классический Urka Phone",
     description: "Рисуй и угадывай по цепочке. Классические правила игры",
-    duration: "15-20 мин",
+    duration: "10-12 мин",
     players: "4-8 игроков",
     rounds: 3
   },
@@ -25,7 +25,7 @@ const gameModes = [
     id: "marathon",
     title: "Марафон",
     description: "Больше раундов, больше веселья!",
-    duration: "25-35 мин",
+    duration: "12-15 мин",
     players: "4-8 игроков",
     rounds: 5
   },
@@ -34,7 +34,6 @@ const gameModes = [
 export default function ChooseGameMode({ 
   onBack, 
   onJoinByCode, 
-  onCreateRoom,
   onRoomCreated
 }) {
   const { user } = useAuth();
@@ -69,7 +68,7 @@ export default function ChooseGameMode({
     try {
       await testConnection();
       setError('');
-      alert('✅ Сервер подключен!');
+      // Убрали alert - пользователь не должен видеть уведомление при успешном подключении
       loadAvailableRooms();
     } catch (error) {
       setError('Сервер не подключен. Запустите бэкенд на localhost:5000');
@@ -88,12 +87,12 @@ export default function ChooseGameMode({
 
   const handleCreateRoom = async () => {
     if (!selectedMode) {
-      alert("Выберите режим игры");
+      setError("Выберите режим игры");
       return;
     }
 
     if (!user) {
-      alert("Необходимо авторизоваться");
+      setError("Необходимо авторизоваться");
       return;
     }
 
@@ -105,7 +104,7 @@ export default function ChooseGameMode({
       console.log('🔑 Токен:', localStorage.getItem('token') ? 'Есть' : 'Нет');
 
       const roomData = {
-        title: `Комната ${user.Login}`,
+        title: `Комната ${user.login || 'пользователя'}`,
         gamemode: selectedMode,
         maxPlayers: 8,
         totalRounds: 3,
@@ -119,7 +118,6 @@ export default function ChooseGameMode({
 
       console.log('✅ Ответ сервера:', response);
 
-      // В функции handleCreateRoom в ChooseGameMode.jsx
       if (response.data && response.data.game) {
         const gameId = response.data.game.gameid;
         console.log(`🎉 Комната создана! ID: ${gameId}`);
@@ -132,7 +130,7 @@ export default function ChooseGameMode({
 
     } catch (error) {
       console.error('❌ Ошибка создания комнаты:', error);
-      alert(`Ошибка создания комнаты: ${error.message}`);
+      setError(`Ошибка создания комнаты: ${error.message}`);
     } finally {
       setCreating(false);
     }
@@ -140,17 +138,18 @@ export default function ChooseGameMode({
 
   const handleJoinByCodeClick = async () => {
     if (!roomCode.trim()) {
-      alert("Введите код комнаты");
+      setError("Введите код комнаты");
       return;
     }
 
     if (!user) {
-      alert("Необходимо авторизоваться");
+      setError("Необходимо авторизоваться");
       return;
     }
 
     try {
       setLoading(true);
+      setError('');
       
       // Переход на страницу комнаты по коду
       navigate(`/room/${roomCode.trim()}`);
@@ -162,7 +161,7 @@ export default function ChooseGameMode({
 
     } catch (error) {
       console.error('❌ Ошибка присоединения:', error);
-      alert(`Ошибка: ${error.message}`);
+      setError(`Ошибка присоединения: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -170,11 +169,12 @@ export default function ChooseGameMode({
 
   const handleJoinRoom = async (roomId) => {
     if (!user) {
-      alert("Необходимо авторизоваться");
+      setError("Необходимо авторизоваться");
       return;
     }
 
     try {
+      setError('');
       // Переход на страницу комнаты
       navigate(`/room/${roomId}`);
       
@@ -185,11 +185,12 @@ export default function ChooseGameMode({
 
     } catch (error) {
       console.error('❌ Ошибка присоединения:', error);
-      alert(`Ошибка: ${error.message}`);
+      setError(`Ошибка присоединения: ${error.message}`);
     }
   };
 
   const handleRefresh = () => {
+    setError('');
     loadAvailableRooms();
   };
 
@@ -211,8 +212,8 @@ export default function ChooseGameMode({
       {error && (
         <div className="connection-error">
           ⚠️ {error}
-          <button onClick={checkServerConnection} className="retry-btn">
-            Проверить подключение
+          <button onClick={handleRefresh} className="retry-btn">
+            Повторить попытку
           </button>
         </div>
       )}

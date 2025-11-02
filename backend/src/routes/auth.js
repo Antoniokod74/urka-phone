@@ -128,7 +128,7 @@ router.post('/login', async (req, res) => {
 // Получение информации о пользователе
 router.get('/me', async (req, res) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
     if (!token) {
       return res.status(401).json({ error: 'Требуется токен доступа' });
@@ -159,7 +159,7 @@ router.get('/me', async (req, res) => {
 router.put('/stats', async (req, res) => {
   try {
     const { gamesplayed, gameswon, points } = req.body;
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
     if (!token) {
       return res.status(401).json({ error: 'Требуется токен доступа' });

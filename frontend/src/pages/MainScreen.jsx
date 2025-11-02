@@ -1,14 +1,10 @@
 import React from "react";
+import { useNavigate } from 'react-router-dom';
 import './MainScreen.css';
 import { useAuth } from '../context/AuthContext';
 
-export default function MainScreen({ 
-  onLoginClick, 
-  onRegisterClick, 
-  onSettingsClick,
-  onStartGameClick,
-  onCreateRoomClick
-}) {
+export default function MainScreen() {
+  const navigate = useNavigate();
   const { user, isAuthenticated, logout } = useAuth();
   
   const userStats = {
@@ -54,7 +50,7 @@ export default function MainScreen({
               <h2>Быстрая игра</h2>
               <p>Присоединиться к случайной комнате или создать новую для друзей</p>
             </div>
-            <button className="btn-start" onClick={onStartGameClick}>
+            <button className="btn-start" onClick={() => navigate('/choose-mode')}>
               Начать игру
             </button>
           </div>
@@ -72,7 +68,7 @@ export default function MainScreen({
               <h2>Приватная комната</h2>
               <p>Создайте закрытую комнату для игры только с приглашенными друзьями</p>
             </div>
-            <button className="btn-create" onClick={onCreateRoomClick}>
+            <button className="btn-create" onClick={() => navigate('/choose-mode')}>
               Создать комнату
             </button>
           </div>
@@ -99,15 +95,15 @@ export default function MainScreen({
         {/* Кнопки авторизации */}
         {!isAuthenticated && (
           <div className="auth-buttons">
-            <button className="main-button" onClick={onLoginClick}>
+            <button className="main-button" onClick={() => navigate('?modal=login')}>
               Войти
             </button>
-            <button className="main-button" onClick={onRegisterClick}>
+            <button className="main-button" onClick={() => navigate('?modal=register')}>
               Регистрация
             </button>
             <button 
               className="settings-button" 
-              onClick={onSettingsClick} 
+              onClick={() => navigate('?modal=settings')} 
               title="Настройки"
             >
               ⚙
@@ -120,7 +116,7 @@ export default function MainScreen({
           <div className="auth-buttons">
             <button 
               className="settings-button" 
-              onClick={onSettingsClick} 
+              onClick={() => navigate('?modal=settings')} 
               title="Настройки"
             >
               ⚙

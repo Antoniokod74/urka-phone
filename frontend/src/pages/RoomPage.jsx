@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import "./RoomPage.css";
 import { useAuth } from '../context/AuthContext';
+import { useParams, useNavigate } from 'react-router-dom';
 
-export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onStartGame }) {
+function RoomPage() {
+  const { roomId } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [players, setPlayers] = useState([]);
   const [roomInfo, setRoomInfo] = useState(null);
@@ -15,9 +18,9 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
   const loadRoomData = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
-      console.log('🔄 Загружаем данные комнаты:', roomCode);
+      console.log('🔄 Загружаем данные комнаты:', roomId);
       
-      const response = await fetch(`api/game/${roomCode}`, {
+      const response = await fetch(`/api/game/${roomId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -48,8 +51,8 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
         console.log('🎮 Используем тестовые данные');
         const mockRoomData = {
           room: {
-            gameid: roomCode,
-            title: `Комната ${roomCode}`,
+            gameid: roomId,
+            title: `Комната ${roomId}`,
             gamemode: 'classic',
             status: 'waiting',
             maxplayers: 8,
@@ -75,7 +78,7 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
     } finally {
       setLoading(false);
     }
-  }, [roomCode, user]);
+  }, [roomId, user]);
 
   useEffect(() => {
     loadRoomData();
@@ -94,11 +97,8 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
           clearInterval(countdownInterval);
           setTimeout(() => {
             setShowCountdown(false);
-            // ПЕРЕХОД НА СТРАНИЦУ ВВОДА СЛОВ
-            console.log('🎮 Переходим на страницу ввода слов');
-            if (typeof onStartGame === "function") {
-              onStartGame(roomCode, players);
-            }
+            // Переходим на страницу создания слов
+            navigate(`/room/${roomId}/create-words`);
           }, 1000);
           return 0;
         }
@@ -107,14 +107,14 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
     }, 1000);
 
     return () => clearInterval(countdownInterval);
-  }, [roomCode, players, onStartGame]);
+  }, [roomId, navigate]);
 
   const toggleReady = async () => {
     try {
       const token = localStorage.getItem('token');
-      console.log('🔄 Изменяем статус готовности для комнаты:', roomCode);
+      console.log('🔄 Изменяем статус готовности для комнаты:', roomId);
       
-      const response = await fetch(`/api/game/${roomCode}/ready`, {
+      const response = await fetch(`/api/game/${roomId}/ready`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -150,9 +150,9 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
   const startGame = async () => {
     try {
       const token = localStorage.getItem('token');
-      console.log('🎮 Начинаем игру для комнаты:', roomCode);
+      console.log('🎮 Начинаем игру для комнаты:', roomId);
       
-      const response = await fetch(`/api/game/${roomCode}/start`, {
+      const response = await fetch(`/api/game/${roomId}/start`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -178,7 +178,7 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
   };
 
   const copyRoomCode = () => {
-    navigator.clipboard.writeText(roomCode).then(() => {
+    navigator.clipboard.writeText(roomId).then(() => {
       alert("Код комнаты скопирован!");
     }).catch(() => {
       alert("Не удалось скопировать код комнаты");
@@ -188,6 +188,10 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
   const handleRefresh = () => {
     setLoading(true);
     loadRoomData();
+  };
+
+  const handleBack = () => {
+    navigate('/choose-mode');
   };
 
   if (loading) {
@@ -202,7 +206,7 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
     return (
       <div className="room-page-container">
         <div className="error-message">❌ {error}</div>
-        <button onClick={onBack} className="back-button">Назад к выбору игры</button>
+        <button onClick={handleBack} className="back-button">Назад к выбору игры</button>
         <button onClick={handleRefresh} className="refresh-button">Повторить попытку</button>
       </div>
     );
@@ -212,7 +216,7 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
     return (
       <div className="room-page-container">
         <div className="error-message">❌ Комната не найдена</div>
-        <button onClick={onBack} className="back-button">Назад к выбору игры</button>
+        <button onClick={handleBack} className="back-button">Назад к выбору игры</button>
       </div>
     );
   }
@@ -243,11 +247,11 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
 
       <div className="room-page-container">
         <header className="room-header">
-          <button className="back-button" title="Назад" onClick={onBack}>
+          <button className="back-button" title="Назад" onClick={handleBack}>
             ← Назад
           </button>
           <div className="room-title">
-            <h2>{roomInfo.title || `Комната ${roomCode}`}</h2>
+            <h2>{roomInfo.title || `Комната ${roomId}`}</h2>
             <div className="subheading">
               {roomInfo.status === 'waiting' ? '🟢 Ожидание игроков...' : 
                roomInfo.status === 'playing' ? '🎮 Игра идет' : '🏁 Игра завершена'}
@@ -256,7 +260,7 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
           <div className="step-indicator">
             <div className="circle">1</div>
           </div>
-          <button className="settings-button" title="Настройки" onClick={onSettings}>
+          <button className="settings-button" title="Настройки" onClick={() => navigate('?modal=settings')}>
             ⚙
           </button>
         </header>
@@ -276,7 +280,7 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
             <div className="room-info-row">
               <span>Код комнаты:</span>
               <span className="code">
-                {roomCode}
+                {roomId}
                 <button className="copy-btn" title="Копировать" onClick={copyRoomCode}>
                   📋
                 </button>
@@ -392,3 +396,5 @@ export default function RoomPage({ roomCode = "ROOM1", onBack, onSettings, onSta
     </>
   );
 }
+
+export default RoomPage;

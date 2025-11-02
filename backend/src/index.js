@@ -1,14 +1,21 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { testConnection } = require('./config/database');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Правильная CORS конфигурация
+// Исправленная CORS конфигурация
 app.use(cors({
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: [
+        'http://localhost:3000', 
+        'http://127.0.0.1:3000',
+        'http://94.232.40.131',
+        'http://94.232.40.131:3000',
+        'https://94.232.40.131'
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
@@ -16,6 +23,9 @@ app.use(cors({
 
 // Middleware
 app.use(express.json());
+
+// Раздача статических файлов фронтенда
+// app.use(express.static(path.join(__dirname, '../frontend/build')));
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -58,8 +68,13 @@ app.get('/api', (req, res) => {
   });
 });
 
+// Обработка всех маршрутов для React Router
+// app.get('*', (req, res) => {
+   // res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
+// });
+
 // Start server
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server is running on port ${PORT}`);
   testConnection();
 });

@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './SettingsWindow.css';
 import { useAuth } from '../context/AuthContext';
 
-export default function SettingsWindow({ onClose }) {
+export default function SettingsWindow() {
+  const navigate = useNavigate();
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [musicEnabled, setMusicEnabled] = useState(true);
   const [effectsVolume, setEffectsVolume] = useState(80);
@@ -28,11 +30,11 @@ export default function SettingsWindow({ onClose }) {
 
   const handleLogout = () => {
     logout();
-    onClose();
+    navigate('/');
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={() => navigate('/')}>
       <div className="modal-content" onClick={e => e.stopPropagation()}>
         <h2>Настройки</h2>
         
@@ -122,7 +124,7 @@ export default function SettingsWindow({ onClose }) {
           </div>
         )}
 
-        <button className="close-button" onClick={onClose}>
+        <button className="close-button" onClick={() => navigate('/')}>
           Закрыть
         </button>
       </div>

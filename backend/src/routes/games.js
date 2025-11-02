@@ -9,7 +9,7 @@ router.post('/create', async (req, res) => {
     console.log('📨 Create game request received:', req.body);
     
     const { title, gamemode, maxPlayers, totalRounds, isPrivate, password } = req.body;
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
     if (!token) {
       return res.status(401).json({ error: 'Требуется токен доступа' });
@@ -132,7 +132,7 @@ router.get('/history', async (req, res) => {
 // Получить статистику игр
 router.get('/stats', async (req, res) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
     if (!token) {
       return res.status(401).json({ error: 'Требуется токен доступа' });
@@ -208,7 +208,7 @@ router.post('/:roomId/join', async (req, res) => {
   try {
     const { roomId } = req.params;
     const { password } = req.body || {};
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
     if (!token) {
       return res.status(401).json({ error: 'Требуется токен доступа' });
@@ -282,7 +282,7 @@ router.post('/:roomId/join', async (req, res) => {
 router.post('/:roomId/ready', async (req, res) => {
   try {
     const { roomId } = req.params;
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
     if (!token) {
       return res.status(401).json({ error: 'Требуется токен доступа' });
@@ -316,7 +316,7 @@ router.post('/:roomId/ready', async (req, res) => {
 router.post('/:roomId/start', async (req, res) => {
   try {
     const { roomId } = req.params;
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
     if (!token) {
       return res.status(401).json({ error: 'Требуется токен доступа' });

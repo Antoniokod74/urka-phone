@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import './App.css';
 import MainScreen from './pages/MainScreen';
 import RegisterWindow from './pages/RegisterWindow';
@@ -6,43 +7,32 @@ import LoginWindow from './pages/LoginWindow';
 import ChooseGameMode from './pages/ChooseGameMode';
 import RoomPage from './pages/RoomPage';
 import SettingsWindow from './pages/SettingsWindow';
-import { useAuth } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import CreateWordsPage from './pages/CreateWordsPage';
 import DrawingPage from './pages/DrawingPage';
-import GuessingPage from './pages/GuessingPage'; // Добавляем импорт страницы угадывания
+import GuessingPage from './pages/GuessingPage';
 
-function App() {
-  const [showRegister, setShowRegister] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showChooseGame, setShowChooseGame] = useState(false);
-  const [showRoom, setShowRoom] = useState(false);
-  const [showCreateWords, setShowCreateWords] = useState(false);
-  const [showDrawing, setShowDrawing] = useState(false);
-  const [showGuessing, setShowGuessing] = useState(false); // Добавляем состояние для страницы угадывания
-  const [roomCodeForJoin, setRoomCodeForJoin] = useState(null);
-  const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+// Компонент для управления навигацией
+function AppContent() {
   const [submittedWords, setSubmittedWords] = useState([]);
-  const [drawings, setDrawings] = useState([]); // Добавляем состояние для сохранения рисунков
-  
-  const { user, login, register, logout, isAuthenticated } = useAuth();
+  const [drawings, setDrawings] = useState([]);
   const [userStats, setUserStats] = useState({
     games: 0,
     wins: 0,
     points: 0,
   });
 
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, login, register, logout, isAuthenticated } = useAuth();
+
+  // Определяем, показывать ли модальные окна на основе query параметров
+  const showRegister = location.search.includes('modal=register');
+  const showLogin = location.search.includes('modal=login');
+  const showSettings = location.search.includes('modal=settings');
+
   useEffect(() => {
-    if (
-      showRegister ||
-      showLogin ||
-      showSettings ||
-      showChooseGame ||
-      showRoom ||
-      showCreateWords ||
-      showDrawing ||
-      showGuessing
-    ) {
+    if (showRegister || showLogin || showSettings) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
@@ -50,7 +40,7 @@ function App() {
     return () => {
       document.body.style.overflow = '';
     };
-  }, [showRegister, showLogin, showSettings, showChooseGame, showRoom, showCreateWords, showDrawing, showGuessing]);
+  }, [showRegister, showLogin, showSettings]);
 
   useEffect(() => {
     if (user) {
@@ -61,189 +51,133 @@ function App() {
       });
     }
   }, [user]);
-  
+
   const switchToRegister = () => {
-    setShowLogin(false);
-    setShowRegister(true);
+    navigate('?modal=register');
   };
 
   const switchToLogin = () => {
-    setShowRegister(false);
-    setShowLogin(true);
+    navigate('?modal=login');
   };
 
   const handleLoginSuccess = () => {
-    setShowLogin(false);
+    navigate('/');
     setUserStats({ games: 12, wins: 8, points: 450 });
   };
 
   const handleRegisterSuccess = () => {
-    setShowRegister(false);
+    navigate('/');
     setUserStats({ games: 0, wins: 0, points: 0 });
-  };
-
-  const handleBackFromChooseGame = () => {
-    setShowChooseGame(false);
   };
 
   // Обработка присоединения по коду
   const handleJoinByCode = (code) => {
-    setRoomCodeForJoin(code);
-    setIsCreatingRoom(false);
-    setShowChooseGame(false);
-    setShowRoom(true);
+    navigate(`/room/${code}`);
   };
 
   // Обработка создания комнаты
   const handleRoomCreated = (roomId) => {
     console.log('🎉 Комната создана, переходим в RoomPage с ID:', roomId);
-    setRoomCodeForJoin(roomId);
-    setIsCreatingRoom(true);
-    setShowChooseGame(false);
-    setShowRoom(true);
-  };
-
-  // Обработка возврата из комнаты
-  const handleBackFromRoom = () => {
-    setShowRoom(false);
-    setShowChooseGame(true);
-  };
-
-  // Обработка клика на "Создать комнату" в MainScreen
-  const handleCreateRoomClick = () => {
-    setShowChooseGame(true);
+    navigate(`/room/${roomId}`);
   };
 
   // Обработчик начала игры - переходит на страницу ввода слов
   const handleStartGame = (roomCode, players) => {
     console.log('🎮 Начинаем игру в комнате:', roomCode, 'Игроки:', players);
-    setShowRoom(false);
-    setShowCreateWords(true);
+    navigate(`/room/${roomCode}/create-words`);
   };
 
   // Обработчик отправки слов - переходит на страницу рисования
-  const handleSubmitWords = (words) => {
+  const handleSubmitWords = (words, roomCode) => {
     console.log('📝 Слова отправлены:', words);
     setSubmittedWords(words);
-    setShowCreateWords(false);
-    setShowDrawing(true);
+    navigate(`/room/${roomCode}/drawing`);
   };
 
   // Обработчик завершения рисования - переходит на страницу угадывания
-  const handleDrawingComplete = (drawingData) => {
+  const handleDrawingComplete = (drawingData, roomCode) => {
     console.log('🎨 Рисунок завершен:', drawingData);
-    // Сохраняем рисунок (в реальном приложении здесь будет логика сохранения)
     setDrawings(prev => [...prev, {
       id: Date.now(),
-      image: drawingData, // Здесь будет data URL рисунка
+      image: drawingData,
       artist: user?.login || 'Игрок',
       originalWord: submittedWords[0] || 'Слово'
     }]);
-    setShowDrawing(false);
-    setShowGuessing(true); // Переходим на страницу угадывания
-  };
-
-  // Обработчик возврата со страницы рисования
-  const handleBackFromDrawing = () => {
-    setShowDrawing(false);
-    setShowRoom(true);
-  };
-
-  // Обработчик возврата со страницы угадывания
-  const handleBackFromGuessing = () => {
-    setShowGuessing(false);
-    setShowRoom(true);
+    navigate(`/room/${roomCode}/guessing`);
   };
 
   // Обработчик отправки догадки
   const handleSubmitGuess = (guess, drawingIndex) => {
     console.log('🔍 Догадка отправлена:', guess, 'для рисунка:', drawingIndex);
-    // Здесь будет логика обработки догадки
-    // После угадывания всех рисунков можно переходить к результатам или следующему раунду
   };
 
   // Закрыть все модальные окна и вернуться на главный экран
   const closeAllModals = () => {
-    setShowRegister(false);
-    setShowLogin(false);
-    setShowSettings(false);
-    setShowChooseGame(false);
-    setShowRoom(false);
-    setShowCreateWords(false);
-    setShowDrawing(false);
-    setShowGuessing(false);
+    navigate('/');
   };
 
   return (
     <div className="App" style={{ minHeight: '100vh' }}>
-      {/* Главный экран */}
-      {!showChooseGame && !showRegister && !showLogin && !showSettings && !showRoom && !showCreateWords && !showDrawing && !showGuessing && (
-        <MainScreen
-          onLoginClick={() => setShowLogin(true)}
-          onRegisterClick={() => setShowRegister(true)}
-          onSettingsClick={() => setShowSettings(true)}
-          onStartGameClick={() => setShowChooseGame(true)}
-          onCreateRoomClick={handleCreateRoomClick}
-          isAuthenticated={isAuthenticated}
-          onLogoutClick={logout}
-          userStats={userStats}
-        />
-      )}
+      {/* Основные маршруты */}
+      <Routes>
+        <Route path="/" element={
+          <MainScreen
+            onLoginClick={() => navigate('?modal=login')}
+            onRegisterClick={() => navigate('?modal=register')}
+            onSettingsClick={() => navigate('?modal=settings')}
+            onStartGameClick={() => navigate('/choose-mode')}
+            onCreateRoomClick={() => navigate('/choose-mode')}
+            isAuthenticated={isAuthenticated}
+            onLogoutClick={logout}
+            userStats={userStats}
+          />
+        } />
+        
+        <Route path="/choose-mode" element={
+          <ChooseGameMode
+            onBack={() => navigate('/')}
+            onJoinByCode={handleJoinByCode}
+            onRoomCreated={handleRoomCreated}
+            availableRooms={[]}
+            onStartGame={handleStartGame}
+          />
+        } />
 
-      {/* Выбор режима игры */}
-      {showChooseGame && (
-        <ChooseGameMode
-          onBack={handleBackFromChooseGame}
-          onJoinByCode={handleJoinByCode}
-          onRoomCreated={handleRoomCreated}
-          availableRooms={[]}
-          onStartGame={handleStartGame}
-        />
-      )}
+        <Route path="/room/:roomId" element={
+          <RoomPage
+            onBack={() => navigate('/choose-mode')}
+            onStartGame={handleStartGame}
+          />
+        } />
 
-      {/* Страница создания слов */}
-      {showCreateWords && (
-        <CreateWordsPage
-          onBack={() => setShowCreateWords(false)}
-          onSubmitWords={handleSubmitWords}
-          players={[]}
-          roomCode={roomCodeForJoin}
-        />
-      )}
+        <Route path="/room/:roomId/create-words" element={
+          <CreateWordsPage
+            onBack={() => navigate(-1)}
+            onSubmitWords={handleSubmitWords}
+            players={[]}
+          />
+        } />
 
-      {/* Страница рисования */}
-      {showDrawing && (
-        <DrawingPage
-          onBack={handleBackFromDrawing}
-          onDrawingComplete={handleDrawingComplete} // Добавляем обработчик завершения рисования
-          words={submittedWords}
-          players={[]}
-          roomCode={roomCodeForJoin}
-        />
-      )}
+        <Route path="/room/:roomId/drawing" element={
+          <DrawingPage
+            onBack={() => navigate(-1)}
+            onDrawingComplete={handleDrawingComplete}
+            words={submittedWords}
+            players={[]}
+          />
+        } />
 
-      {/* Страница угадывания */}
-      {showGuessing && (
-        <GuessingPage
-          onBack={handleBackFromGuessing}
-          onSubmitGuess={handleSubmitGuess}
-          drawings={drawings}
-          players={[]}
-          roomCode={roomCodeForJoin}
-        />
-      )}
+        <Route path="/room/:roomId/guessing" element={
+          <GuessingPage
+            onBack={() => navigate(-1)}
+            onSubmitGuess={handleSubmitGuess}
+            drawings={drawings}
+            players={[]}
+          />
+        } />
+      </Routes>
 
-      {/* Страница комнаты */}
-      {showRoom && (
-        <RoomPage
-          roomCode={roomCodeForJoin}
-          isCreating={isCreatingRoom}
-          onBack={handleBackFromRoom}
-          onStartGame={handleStartGame}
-        />
-      )}
-
-      {/* Окно регистрации */}
+      {/* Модальные окна (показываются поверх любого маршрута) */}
       {showRegister && (
         <div
           style={{
@@ -268,7 +202,6 @@ function App() {
         </div>
       )}
 
-      {/* Окно входа */}
       {showLogin && (
         <div
           style={{
@@ -293,11 +226,19 @@ function App() {
         </div>
       )}
 
-      {/* Окно настроек */}
       {showSettings && (
-        <SettingsWindow onClose={() => setShowSettings(false)} />
+        <SettingsWindow onClose={() => navigate('/')} />
       )}
     </div>
+  );
+}
+
+// Главный компонент App
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

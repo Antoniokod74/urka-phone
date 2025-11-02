@@ -7,7 +7,6 @@ export default function CreateWordsPage({ onBack, onSubmitWords, players = [], r
   const [word, setWord] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(60); // 60 секунд на ввод слова
-  const [usedWords, setUsedWords] = useState(new Set());
 
   // Список подсказок для вдохновения
   const wordPrompts = [
@@ -22,7 +21,7 @@ export default function CreateWordsPage({ onBack, onSubmitWords, players = [], r
       const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
       return () => clearTimeout(timer);
     } else if (timeLeft === 0 && !submitted) {
-      handleSubmit();
+      handleAutoSubmit();
     }
   }, [timeLeft, submitted]);
 
@@ -30,10 +29,23 @@ export default function CreateWordsPage({ onBack, onSubmitWords, players = [], r
     if (word.trim()) {
       setSubmitted(true);
       if (onSubmitWords) {
-        onSubmitWords([word.trim()]); // Отправляем массив с одним словом
+        onSubmitWords([word.trim()], roomCode); // Добавлен roomCode
       }
     } else {
       alert("Пожалуйста, введите слово!");
+    }
+  };
+
+  const handleAutoSubmit = () => {
+    let finalWord = word.trim();
+    if (!finalWord) {
+      // Если слово пустое, берем случайное из подсказок
+      finalWord = wordPrompts[Math.floor(Math.random() * wordPrompts.length)];
+      setWord(finalWord);
+    }
+    setSubmitted(true);
+    if (onSubmitWords) {
+      onSubmitWords([finalWord], roomCode); // Добавлен roomCode
     }
   };
 
@@ -44,8 +56,6 @@ export default function CreateWordsPage({ onBack, onSubmitWords, players = [], r
   };
 
   const getPlayerStatus = (player) => {
-    // Здесь будет логика проверки статуса отправки слов
-    // Пока используем заглушку
     return player.userid === user?.userid && submitted ? "submitted" : "waiting";
   };
 

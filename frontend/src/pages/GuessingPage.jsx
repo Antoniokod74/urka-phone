@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import "./GuessingPage.css";
 import { useAuth } from '../context/AuthContext';
 
-export default function GuessingPage({ onBack, drawings = [], players = [], roomCode, onSubmitGuess }) {
+export default function GuessingPage({ drawings = [], players = [], roomCode, onSubmitGuess }) {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [currentGuess, setCurrentGuess] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -81,7 +83,7 @@ export default function GuessingPage({ onBack, drawings = [], players = [], room
     <div className="guess-container">
       {/* Шапка */}
       <header className="guess-header">
-        <button className="guess-back-button" onClick={onBack}>
+        <button className="guess-back-button" onClick={() => navigate(-1)}>
           ← Назад
         </button>
         <div className="guess-title">

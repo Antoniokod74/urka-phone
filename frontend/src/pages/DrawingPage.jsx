@@ -1,51 +1,46 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import "./DrawingPage.css";
 import { useAuth } from '../context/AuthContext';
 
-export default function DrawingPage({ onBack, words = [], players = [], roomCode, onDrawingComplete }) {
+export default function DrawingPage({ words = [], players = [], roomCode, onDrawingComplete }) {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const canvasRef = useRef(null);
   const [currentWord, setCurrentWord] = useState("");
   const [isDrawing, setIsDrawing] = useState(false);
   const [color, setColor] = useState("#000000");
   const [brushSize, setBrushSize] = useState(5);
-  const [timeLeft, setTimeLeft] = useState(60); // 60 секунд на рисование
+  const [timeLeft, setTimeLeft] = useState(60);
   const [showWord, setShowWord] = useState(true);
-  const [currentRound] = useState(1); // Убрал setCurrentRound так как он не используется
-  const [totalRounds] = useState(3); // Убрал setTotalRounds так как он не используется
+  const [currentRound] = useState(1);
+  const [totalRounds] = useState(3);
   const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
 
-  // Цвета для палитры
   const colors = [
     "#000000", "#FF0000", "#00FF00", "#0000FF", "#FFFF00",
     "#FF00FF", "#00FFFF", "#FFA500", "#800080", "#FFC0CB",
     "#A52A2A", "#808080", "#FFFFFF"
   ];
 
-  // Размеры кистей
   const brushSizes = [2, 5, 10, 15, 20];
 
-  // Функция обработки завершения времени
   const handleTimeUp = useCallback(() => {
-    // Сохраняем рисунок и переходим к следующему этапу
     const canvas = canvasRef.current;
-    const drawingData = canvas.toDataURL(); // Получаем data URL рисунка
+    const drawingData = canvas.toDataURL();
     
     console.log('🎨 Рисунок завершен, переходим к угадыванию');
     
     if (onDrawingComplete) {
-      onDrawingComplete(drawingData); // Передаем данные рисунка
+      onDrawingComplete(drawingData);
     }
   }, [onDrawingComplete]);
 
-  // Получаем слово для рисования (если игрок один - его же слово)
   useEffect(() => {
     if (words.length > 0) {
-      // Если игрок один или это первый раунд - показываем его слово
       if (players.length === 1 || currentRound === 1) {
         setCurrentWord(words[0]);
       } else {
-        // Иначе берем слово следующего игрока по кругу
         const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
         setCurrentPlayerIndex(nextPlayerIndex);
         setCurrentWord(words[nextPlayerIndex] || words[0]);
@@ -53,23 +48,19 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
     }
   }, [words, players, currentRound, currentPlayerIndex]);
 
-  // Таймер рисования
   useEffect(() => {
     if (timeLeft > 0) {
       const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
       return () => clearTimeout(timer);
     } else {
-      // Время вышло - переходим к следующему этапу
       handleTimeUp();
     }
-  }, [timeLeft, handleTimeUp]); // Добавлен handleTimeUp в зависимости
+  }, [timeLeft, handleTimeUp]);
 
-  // Инициализация canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     
-    // Настройка canvas
     canvas.width = 800;
     canvas.height = 500;
     ctx.fillStyle = '#FFFFFF';
@@ -123,7 +114,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   };
 
-  // Функция для ручного завершения рисования
   const handleCompleteDrawing = () => {
     handleTimeUp();
   };
@@ -140,9 +130,8 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
 
   return (
     <div className="drawing-container">
-      {/* Шапка */}
       <header className="drawing-header">
-        <button className="back-button" onClick={onBack}>
+        <button className="back-button" onClick={() => navigate(-1)}>
           ← Назад
         </button>
         <div className="drawing-title">
@@ -157,11 +146,9 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
       </header>
 
       <div className="drawing-content">
-        {/* Левая панель - инструменты */}
         <div className="tools-panel">
           <h3>🛠️ Инструменты</h3>
           
-          {/* Палитра цветов */}
           <div className="color-palette">
             <h4>Цвета:</h4>
             <div className="colors-grid">
@@ -176,7 +163,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
             </div>
           </div>
 
-          {/* Размер кисти */}
           <div className="brush-sizes">
             <h4>Размер кисти:</h4>
             <div className="sizes-grid">
@@ -199,7 +185,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
             </div>
           </div>
 
-          {/* Действия */}
           <div className="actions">
             <button className="action-btn clear" onClick={clearCanvas}>
               🗑️ Очистить
@@ -213,7 +198,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
             >
               {showWord ? '👁️‍🗨️ Скрыть слово' : '👁️‍🗨️ Показать слово'}
             </button>
-            {/* Кнопка завершения рисования */}
             <button 
               className="action-btn complete"
               onClick={handleCompleteDrawing}
@@ -222,7 +206,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
             </button>
           </div>
 
-          {/* Предпросмотр кисти */}
           <div className="brush-preview-section">
             <h4>Предпросмотр:</h4>
             <div className="preview-canvas">
@@ -239,16 +222,13 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
           </div>
         </div>
 
-        {/* Центральная панель - canvas */}
         <div className="drawing-area">
-          {/* Слово для рисования */}
           <div className={`word-display ${showWord ? 'visible' : 'hidden'}`}>
             <div className="word-label">Рисуйте:</div>
             <div className="the-word">{currentWord}</div>
             <div className="word-hint">(Это слово придумал другой игрок)</div>
           </div>
 
-          {/* Canvas */}
           <div className="canvas-container">
             <canvas
               ref={canvasRef}
@@ -263,7 +243,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
             />
           </div>
 
-          {/* Подсказки по рисованию */}
           <div className="drawing-tips">
             <h4>💡 Советы для рисования:</h4>
             <div className="tips-list">
@@ -275,11 +254,9 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
           </div>
         </div>
 
-        {/* Правая панель - информация */}
         <div className="info-panel">
           <h3>📊 Информация</h3>
           
-          {/* Текущий игрок */}
           <div className="current-artist">
             <h4>🎨 Сейчас рисует:</h4>
             <div className="artist-info">
@@ -293,7 +270,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
             </div>
           </div>
 
-          {/* Прогресс игры */}
           <div className="game-progress">
             <h4>📈 Прогресс раунда:</h4>
             <div className="progress-bar">
@@ -307,7 +283,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
             </div>
           </div>
 
-          {/* Следующий художник */}
           <div className="next-artist">
             <h4>⏭️ Следующий художник:</h4>
             <div className="next-player">
@@ -326,7 +301,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
             </div>
           </div>
 
-          {/* Инструменты быстрого доступа */}
           <div className="quick-tools">
             <h4>⚡ Быстрые инструменты:</h4>
             <div className="quick-buttons">
@@ -362,7 +336,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
             </div>
           </div>
 
-          {/* Кнопка быстрого завершения */}
           <div className="quick-complete">
             <button 
               className="complete-now-btn"
@@ -374,7 +347,6 @@ export default function DrawingPage({ onBack, words = [], players = [], roomCode
         </div>
       </div>
 
-      {/* Мобильные инструменты */}
       <div className="mobile-tools">
         <div className="mobile-colors">
           {colors.slice(0, 6).map((colorItem, index) => (

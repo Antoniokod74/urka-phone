@@ -1,8 +1,10 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "./RegisterWindow.css";
 import myImage from '../assets/imagregavt.png';
 
-export default function RegisterWindow({ onSwitchToLogin, onRegisterSuccess, onHomeClick, onRegister }) {
+export default function RegisterWindow({ onRegisterSuccess, onRegister }) {
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     login: '',
     password: '',
@@ -70,7 +72,7 @@ export default function RegisterWindow({ onSwitchToLogin, onRegisterSuccess, onH
     <div className="register-container">
       <button 
         className="home-button"
-        onClick={onHomeClick}
+        onClick={() => navigate('/')}
         disabled={loading}
         title="Вернуться на главную"
       >
@@ -146,7 +148,7 @@ export default function RegisterWindow({ onSwitchToLogin, onRegisterSuccess, onH
           Уже есть аккаунт?{' '}
           <span 
             className="login-link" 
-            onClick={loading ? undefined : onSwitchToLogin}
+            onClick={loading ? undefined : () => navigate('?modal=login')}
           >
             Войдите
           </span>
