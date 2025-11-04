@@ -42,7 +42,6 @@ export default function ChooseGameMode() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
-  const [gameData, setGameData] = useState({});
 
   // Загрузка доступных комнат
   const loadAvailableRooms = useCallback(async () => {
@@ -50,11 +49,10 @@ export default function ChooseGameMode() {
       setLoading(true);
       setError('');
       const response = await gameAPI.getActiveRooms();
-      console.log('📊 Active rooms response:', response);
       setAvailableRooms(response.data.rooms || []);
     } catch (error) {
       console.error('❌ Ошибка загрузки комнат:', error);
-      setError('Не удалось загрузить список активных комнат: ' + error.message);
+      setError('Не удалось загрузить список активных комнат');
     } finally {
       setLoading(false);
     }
@@ -67,31 +65,8 @@ export default function ChooseGameMode() {
       setError('');
       loadAvailableRooms();
     } catch (error) {
-      setError('Сервер не подключен. Запустите бэкенд на localhost:5000');
+      setError('Сервер не подключен');
     }
-  }, [loadAvailableRooms]);
-
-  // WebSocket для обновления комнат в реальном времени
-  useEffect(() => {
-    let ws = null;
-    try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/rooms`;
-      ws = new WebSocket(wsUrl);
-      
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'ROOMS_UPDATE') {
-          loadAvailableRooms();
-        }
-      };
-    } catch (error) {
-      console.log('WebSocket не поддерживается для комнат');
-    }
-
-    return () => {
-      if (ws) ws.close();
-    };
   }, [loadAvailableRooms]);
 
   useEffect(() => {
@@ -101,7 +76,7 @@ export default function ChooseGameMode() {
   useEffect(() => {
     loadAvailableRooms();
     
-    // Интервал для обновления комнат каждые 5 секунд
+    // Интервал для обновления комнат
     const interval = setInterval(loadAvailableRooms, 5000);
     return () => clearInterval(interval);
   }, [loadAvailableRooms]);
@@ -114,7 +89,6 @@ export default function ChooseGameMode() {
 
     if (!user) {
       setError("Необходимо авторизоваться");
-      navigate('?modal=login');
       return;
     }
 
@@ -122,28 +96,19 @@ export default function ChooseGameMode() {
       setCreating(true);
       setError('');
 
-      console.log('🔄 Создаем комнату...');
-
       const roomData = {
         title: `Комната ${user.login || 'пользователя'}`,
         gamemode: selectedMode,
         maxPlayers: 8,
-        totalRounds: gameModes.find(mode => mode.id === selectedMode)?.rounds || 3,
+        totalRounds: 3,
         isPrivate: isPrivateRoom,
         password: isPrivateRoom ? roomPassword : null
       };
 
-      console.log('📨 Отправляем данные:', roomData);
-
       const response = await gameAPI.createGame(roomData);
-
-      console.log('✅ Ответ сервера:', response);
 
       if (response.data && response.data.game) {
         const gameId = response.data.game.gameid;
-        console.log(`🎉 Комната создана! ID: ${gameId}`);
-        
-        // Переходим в созданную комнату
         navigate(`/room/${gameId}`);
       }
 
@@ -163,7 +128,6 @@ export default function ChooseGameMode() {
 
     if (!user) {
       setError("Необходимо авторизоваться");
-      navigate('?modal=login');
       return;
     }
 
@@ -171,15 +135,8 @@ export default function ChooseGameMode() {
       setLoading(true);
       setError('');
       
-      // Проверяем существование комнаты перед переходом
-      const response = await gameAPI.getRoom(roomCode.trim());
-      
-      if (response.data && response.data.room) {
-        // Переход на страницу комнаты по коду
-        navigate(`/room/${roomCode.trim()}`);
-      } else {
-        setError('Комната не найдена');
-      }
+      // Переход на страницу комнаты по коду
+      navigate(`/room/${roomCode.trim()}`);
 
     } catch (error) {
       console.error('❌ Ошибка присоединения:', error);
@@ -192,36 +149,17 @@ export default function ChooseGameMode() {
   const handleJoinRoom = async (roomId) => {
     if (!user) {
       setError("Необходимо авторизоваться");
-      navigate('?modal=login');
       return;
     }
 
     try {
       setError('');
-      setLoading(true);
-      
-      // Проверяем комнату перед присоединением
-      const response = await gameAPI.getRoom(roomId);
-      
-      if (response.data && response.data.room) {
-        // Присоединяемся к комнате
-        const joinResponse = await gameAPI.joinRoom(roomId);
-        
-        if (joinResponse.data.success) {
-          // Переход на страницу комнаты
-          navigate(`/room/${roomId}`);
-        } else {
-          setError('Не удалось присоединиться к комнате');
-        }
-      } else {
-        setError('Комната не найдена');
-      }
+      // Переход на страницу комнаты
+      navigate(`/room/${roomId}`);
 
     } catch (error) {
       console.error('❌ Ошибка присоединения:', error);
       setError(`Ошибка присоединения: ${error.message}`);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -235,43 +173,13 @@ export default function ChooseGameMode() {
     return mode ? mode.title : modeId;
   };
 
-  const handleQuickJoin = async () => {
-    if (!user) {
-      navigate('?modal=login');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError('');
-      
-      // Находим первую доступную комнату
-      const availableRoom = availableRooms.find(room => 
-        room.status === 'waiting' && 
-        room.currentplayers < room.maxplayers
-      );
-
-      if (availableRoom) {
-        await handleJoinRoom(availableRoom.gameid);
-      } else {
-        // Если нет доступных комнат, создаем новую
-        await handleCreateRoom();
-      }
-    } catch (error) {
-      console.error('❌ Ошибка быстрого присоединения:', error);
-      setError('Ошибка быстрого присоединения');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="choose-game-container">
       <div className="choose-game-header">
         <button className="back-button" onClick={() => navigate(-1)}>
-          Назад
+          ← Назад
         </button>
-        <h2 className="choose-game-title">Gartic Phone - Выбор игры</h2>
+        <h2 className="choose-game-title">Urka Phone - Выбор игры</h2>
         {user && <div className="user-info">Вы вошли как: {user.login}</div>}
       </div>
 
@@ -279,7 +187,7 @@ export default function ChooseGameMode() {
         <div className="connection-error">
           ⚠️ {error}
           <button onClick={handleRefresh} className="retry-btn">
-            Повторить попытку
+            Обновить
           </button>
         </div>
       )}
@@ -306,20 +214,6 @@ export default function ChooseGameMode() {
                 )}
               </div>
             ))}
-          </div>
-
-          {/* Кнопка быстрого присоединения */}
-          <div className="quick-join-section">
-            <button 
-              className="quick-join-btn"
-              onClick={handleQuickJoin}
-              disabled={loading || creating}
-            >
-              🎯 Быстрое присоединение
-            </button>
-            <p className="quick-join-hint">
-              {user ? 'Автоматически найдет доступную комнату или создаст новую' : 'Требуется авторизация'}
-            </p>
           </div>
 
           {!user ? (
@@ -352,11 +246,9 @@ export default function ChooseGameMode() {
                       type="password"
                       value={roomPassword}
                       onChange={(e) => setRoomPassword(e.target.value)}
-                      placeholder="Введите пароль для комнаты (минимум 4 символа)"
+                      placeholder="Введите пароль для комнаты"
                       className="password-field"
-                      minLength={4}
                     />
-                    <p className="password-hint">🔒 Пароль потребуется для входа в комнату</p>
                   </div>
                 )}
               </div>
@@ -364,9 +256,9 @@ export default function ChooseGameMode() {
               <button 
                 className="create-room-btn" 
                 onClick={handleCreateRoom}
-                disabled={creating || (isPrivateRoom && roomPassword.length < 4)}
+                disabled={creating}
               >
-                {creating ? 'Создание...' : "🎮 Создать игровую комнату"}
+                {creating ? 'Создание...' : "🎮 Создать комнату"}
               </button>
             </>
           )}
@@ -395,16 +287,13 @@ export default function ChooseGameMode() {
           <div className="active-rooms">
             <div className="rooms-header">
               <h3>🎪 Активные комнаты ({availableRooms.length})</h3>
-              <div className="rooms-controls">
-                <span className="live-indicator">● Live</span>
-                <button onClick={handleRefresh} className="refresh-button" disabled={loading}>
-                  {loading ? '🔄' : '⟳ Обновить'}
-                </button>
-              </div>
+              <button onClick={handleRefresh} className="refresh-button" disabled={loading}>
+                {loading ? '🔄' : '⟳'}
+              </button>
             </div>
             
             {loading ? (
-              <div className="loading-message">🔄 Загрузка активных комнат...</div>
+              <div className="loading-message">Загрузка комнат...</div>
             ) : availableRooms.length > 0 ? (
               <div className="rooms-list">
                 {availableRooms.map((room) => (
@@ -413,8 +302,7 @@ export default function ChooseGameMode() {
                       <div className="room-header">
                         <strong>{room.title || `Комната #${room.gameid}`}</strong>
                         <span className={`room-status ${room.status === 'waiting' ? 'active' : 'playing'}`}>
-                          {room.status === 'waiting' ? '🟢 Ожидание' : 
-                           room.status === 'playing' ? '🎮 Играется' : room.status}
+                          {room.status === 'waiting' ? '🟢 Ожидание' : '🎮 Играется'}
                         </span>
                       </div>
                       <div className="room-details">
@@ -424,11 +312,7 @@ export default function ChooseGameMode() {
                         <div className="room-players">
                           👥 Игроков: {room.currentplayers}/{room.maxplayers}
                         </div>
-                        <div className="room-time">
-                          🕒 Создана: {new Date(room.createdat).toLocaleTimeString()}
-                        </div>
                         {room.isprivate && <div className="room-private">🔒 Приватная</div>}
-                        {room.hostname && <div className="room-host">👑 Хост: {room.hostname}</div>}
                       </div>
                     </div>
                     <button 
@@ -436,8 +320,7 @@ export default function ChooseGameMode() {
                       className="join-button"
                       disabled={!user || room.status !== 'waiting' || room.currentplayers >= room.maxplayers}
                     >
-                      {!user ? 'Войти' : 
-                       room.status === 'waiting' ? 
+                      {room.status === 'waiting' ? 
                        (room.currentplayers >= room.maxplayers ? 'Полная' : 'Войти') : 
                        'Играется'}
                     </button>
@@ -446,7 +329,7 @@ export default function ChooseGameMode() {
               </div>
             ) : (
               <div className="no-rooms-message">
-                🏜️ Нет активных комнат. Создайте новую комнату и пригласите друзей!
+                Нет активных комнат
               </div>
             )}
           </div>
