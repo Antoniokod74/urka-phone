@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import "./RoomPage.css";
 import { useAuth } from '../context/AuthContext';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -14,8 +14,14 @@ function RoomPage() {
   const [showCountdown, setShowCountdown] = useState(false);
   const [countdownNumber, setCountdownNumber] = useState(3);
 
+  const isLoadingRef = useRef(false);
+  const mountedRef = useRef(true);
+
   // Загрузка данных комнаты и игроков
   const loadRoomData = useCallback(async () => {
+    if (isLoadingRef.current || !mountedRef.current) return;
+    
+    isLoadingRef.current = true;
     try {
       const token = localStorage.getItem('token');
       console.log('🔄 Загружаем данные комнаты:', roomId);
@@ -38,53 +44,110 @@ function RoomPage() {
         throw new Error('Некорректный формат данных комнаты');
       }
       
-      setRoomInfo(data.room);
-      setPlayers(data.players || []);
-      setError(''); // Очищаем ошибку при успешной загрузке
+      if (mountedRef.current) {
+        setRoomInfo(data.room);
+        setPlayers(data.players || []);
+        setError('');
+      }
       
     } catch (error) {
       console.error('❌ Ошибка загрузки комнаты:', error);
-      setError(`Не удалось загрузить данные комнаты: ${error.message}`);
       
-      // Используем мок-данные только если комната не найдена (404)
-      if (error.message.includes('404') || error.message.includes('не найдена')) {
-        console.log('🎮 Используем тестовые данные');
-        const mockRoomData = {
-          room: {
-            gameid: roomId,
-            title: `Комната ${roomId}`,
-            gamemode: 'classic',
-            status: 'waiting',
-            maxplayers: 8,
-            currentplayers: 1,
-            currentround: 1,
-            totalrounds: 3,
-            createdat: new Date().toISOString()
-          },
-          players: [
-            {
-              userid: user?.userid || 1,
-              login: user?.login || 'Тестовый игрок',
-              ishost: true,
-              ready: false,
-              score: 0
-            }
-          ]
-        };
-        setRoomInfo(mockRoomData.room);
-        setPlayers(mockRoomData.players);
-        setError(''); // Очищаем ошибку при использовании мок-данных
+      if (mountedRef.current) {
+        setError(`Не удалось загрузить данные комнаты: ${error.message}`);
+        
+        // Используем мок-данные только если комната не найдена (404)
+        if (error.message.includes('404') || error.message.includes('не найдена')) {
+          console.log('🎮 Используем тестовые данные');
+          const mockRoomData = {
+            room: {
+              gameid: roomId,
+              title: `Комната ${roomId}`,
+              gamemode: 'classic',
+              status: 'waiting',
+              maxplayers: 8,
+              currentplayers: 1,
+              currentround: 1,
+              totalrounds: 3,
+              createdat: new Date().toISOString()
+            },
+            players: [
+              {
+                userid: user?.userid || 1,
+                login: user?.login || 'Тестовый игрок',
+                ishost: true,
+                ready: false,
+                score: 0
+              }
+            ]
+          };
+          setRoomInfo(mockRoomData.room);
+          setPlayers(mockRoomData.players);
+          setError('');
+        }
       }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+      isLoadingRef.current = false;
     }
   }, [roomId, user]);
 
   useEffect(() => {
+    mountedRef.current = true;
+    
+    // Первоначальная загрузка
     loadRoomData();
-    const interval = setInterval(loadRoomData, 3000);
-    return () => clearInterval(interval);
-  }, [loadRoomData]);
+    
+    // Интервал для обновления каждые 2 секунды
+    const interval = setInterval(loadRoomData, 2000);
+    
+    // WebSocket для реального времени (если поддерживается бэкендом)
+    let ws = null;
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/game/${roomId}`;
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('WebSocket подключен');
+      };
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        console.log('WebSocket сообщение:', data);
+        
+        if (data.type === 'PLAYER_JOINED' || data.type === 'PLAYER_LEFT' || data.type === 'PLAYER_READY') {
+          // Обновляем данные при изменении состава игроков
+          loadRoomData();
+        }
+        
+        if (data.type === 'GAME_STARTED') {
+          // Запускаем отсчет если игра начата
+          startCountdown();
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket ошибка:', error);
+      };
+      
+      ws.onclose = () => {
+        console.log('WebSocket отключен');
+      };
+    } catch (error) {
+      console.log('WebSocket не поддерживается, используем polling');
+    }
+
+    return () => {
+      mountedRef.current = false;
+      clearInterval(interval);
+      if (ws) {
+        ws.close();
+      }
+    };
+  }, [loadRoomData, roomId]);
 
   // Функция для запуска отсчета
   const startCountdown = useCallback(() => {
@@ -315,9 +378,9 @@ function RoomPage() {
           <div className="players-panel">
             <div className="players-header">
               <h3>👥 Игроки ({currentPlayers}/{totalPlayers})</h3>
-              <button onClick={handleRefresh} className="refresh-btn" title="Обновить">
-                🔄
-              </button>
+              <div className="connection-status">
+                <span className="live-indicator">●</span> Live
+              </div>
             </div>
 
             <div className="players-grid">

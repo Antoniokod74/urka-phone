@@ -13,9 +13,14 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
   const [brushSize, setBrushSize] = useState(5);
   const [timeLeft, setTimeLeft] = useState(60);
   const [showWord, setShowWord] = useState(true);
-  const [currentRound] = useState(1);
-  const [totalRounds] = useState(3);
+  const [currentRound, setCurrentRound] = useState(1);
+  const [totalRounds, setTotalRounds] = useState(3);
   const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
+  const [gameData, setGameData] = useState({});
+  
+  const timerRef = useRef(null);
+  const isMountedRef = useRef(true);
+  const lastPosRef = useRef({ x: 0, y: 0 });
 
   const colors = [
     "#000000", "#FF0000", "#00FF00", "#0000FF", "#FFFF00",
@@ -25,16 +30,109 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
 
   const brushSizes = [2, 5, 10, 15, 20];
 
-  const handleTimeUp = useCallback(() => {
+  // Загрузка данных игры в реальном времени
+  const loadGameData = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/game/${roomCode}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (isMountedRef.current) {
+          setGameData(data);
+          
+          // Обновляем данные с сервера
+          if (data.room?.currentround) setCurrentRound(data.room.currentround);
+          if (data.room?.totalrounds) setTotalRounds(data.room.totalrounds);
+          if (data.room?.timeLeft) setTimeLeft(data.room.timeLeft);
+          
+          // Обновляем текущее слово для рисования
+          if (data.currentWord) {
+            setCurrentWord(data.currentWord);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки данных игры:', error);
+    }
+  }, [roomCode]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    
+    // Загружаем данные игры
+    loadGameData();
+    
+    // Обновляем каждые 2 секунды
+    const interval = setInterval(loadGameData, 2000);
+    
+    // WebSocket для реального времени
+    let ws = null;
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/game/${roomCode}`;
+      ws = new WebSocket(wsUrl);
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'DRAWING_UPDATE' || data.type === 'TIME_UPDATE') {
+          loadGameData();
+        }
+        
+        if (data.type === 'NEXT_PHASE') {
+          // Переходим к следующей фазе игры
+          handleTimeUp();
+        }
+      };
+    } catch (error) {
+      console.log('WebSocket не поддерживается, используем polling');
+    }
+
+    return () => {
+      isMountedRef.current = false;
+      clearInterval(interval);
+      if (ws) ws.close();
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [loadGameData, roomCode]);
+
+  const handleTimeUp = useCallback(async () => {
     const canvas = canvasRef.current;
     const drawingData = canvas.toDataURL();
     
-    console.log('🎨 Рисунок завершен, переходим к угадыванию');
+    console.log('🎨 Рисунок завершен, отправка на сервер');
     
-    if (onDrawingComplete) {
-      onDrawingComplete(drawingData);
+    try {
+      // Отправляем рисунок на сервер
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/game/${roomCode}/drawing`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          image: drawingData,
+          word: currentWord
+        })
+      });
+
+      if (response.ok) {
+        console.log('✅ Рисунок отправлен на сервер');
+        if (onDrawingComplete) {
+          onDrawingComplete(drawingData);
+        }
+      } else {
+        console.error('❌ Ошибка отправки рисунка');
+      }
+    } catch (error) {
+      console.error('❌ Ошибка:', error);
     }
-  }, [onDrawingComplete]);
+  }, [onDrawingComplete, roomCode, currentWord]);
 
   useEffect(() => {
     if (words.length > 0) {
@@ -48,13 +146,21 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
     }
   }, [words, players, currentRound, currentPlayerIndex]);
 
+  // Таймер на клиенте как fallback
   useEffect(() => {
     if (timeLeft > 0) {
-      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
-      return () => clearTimeout(timer);
-    } else {
+      timerRef.current = setTimeout(() => {
+        if (isMountedRef.current) {
+          setTimeLeft(prev => prev - 1);
+        }
+      }, 1000);
+    } else if (timeLeft === 0) {
       handleTimeUp();
     }
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, [timeLeft, handleTimeUp]);
 
   useEffect(() => {
@@ -74,14 +180,15 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
     const ctx = canvas.getContext('2d');
     const rect = canvas.getBoundingClientRect();
     
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    lastPosRef.current = { x, y };
+    
     ctx.strokeStyle = color;
     ctx.lineWidth = brushSize;
-    
     ctx.beginPath();
-    ctx.moveTo(
-      e.clientX - rect.left,
-      e.clientY - rect.top
-    );
+    ctx.moveTo(x, y);
     
     setIsDrawing(true);
   };
@@ -93,11 +200,13 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
     const ctx = canvas.getContext('2d');
     const rect = canvas.getBoundingClientRect();
     
-    ctx.lineTo(
-      e.clientX - rect.left,
-      e.clientY - rect.top
-    );
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    ctx.lineTo(x, y);
     ctx.stroke();
+    
+    lastPosRef.current = { x, y };
   };
 
   const stopDrawing = () => {
@@ -114,6 +223,12 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   };
 
+  const undoLast = () => {
+    // Простая реализация отмены - очистка canvas
+    // В реальном приложении нужно хранить историю действий
+    clearCanvas();
+  };
+
   const handleCompleteDrawing = () => {
     handleTimeUp();
   };
@@ -127,6 +242,10 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
   const toggleWordVisibility = () => {
     setShowWord(!showWord);
   };
+
+  // Используем актуальных игроков из gameData или из пропсов
+  const actualPlayers = gameData.players || players;
+  const actualWords = gameData.words || words;
 
   return (
     <div className="drawing-container">
@@ -189,7 +308,7 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
             <button className="action-btn clear" onClick={clearCanvas}>
               🗑️ Очистить
             </button>
-            <button className="action-btn undo">
+            <button className="action-btn undo" onClick={undoLast}>
               ↩️ Отменить
             </button>
             <button 
@@ -236,9 +355,18 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
               onMouseMove={draw}
               onMouseUp={stopDrawing}
               onMouseLeave={stopDrawing}
-              onTouchStart={startDrawing}
-              onTouchMove={draw}
-              onTouchEnd={stopDrawing}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                startDrawing(e.touches[0]);
+              }}
+              onTouchMove={(e) => {
+                e.preventDefault();
+                draw(e.touches[0]);
+              }}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                stopDrawing();
+              }}
               className="drawing-canvas"
             />
           </div>
@@ -286,13 +414,13 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
           <div className="next-artist">
             <h4>⏭️ Следующий художник:</h4>
             <div className="next-player">
-              {players.length > 1 ? (
+              {actualPlayers.length > 1 ? (
                 <>
                   <div className="next-avatar">
-                    {players[(currentPlayerIndex + 1) % players.length]?.login?.charAt(0).toUpperCase() || '?'}
+                    {actualPlayers[(currentPlayerIndex + 1) % actualPlayers.length]?.login?.charAt(0).toUpperCase() || '?'}
                   </div>
                   <div className="next-name">
-                    {players[(currentPlayerIndex + 1) % players.length]?.login || 'Игрок'}
+                    {actualPlayers[(currentPlayerIndex + 1) % actualPlayers.length]?.login || 'Игрок'}
                   </div>
                 </>
               ) : (

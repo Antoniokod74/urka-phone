@@ -3,21 +3,30 @@ const router = express.Router();
 const { query } = require('../config/database');
 const jwt = require('jsonwebtoken');
 
+// Middleware для проверки токена
+const authenticateToken = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  
+  if (!token) {
+    return res.status(401).json({ error: 'Требуется токен доступа' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-in-production');
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(403).json({ error: 'Недействительный токен' });
+  }
+};
+
 // Создание новой игры
-router.post('/create', async (req, res) => {
+router.post('/create', authenticateToken, async (req, res) => {
   try {
     console.log('📨 Create game request received:', req.body);
     
     const { title, gamemode, maxPlayers, totalRounds, isPrivate, password } = req.body;
-    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
-    if (!token) {
-      return res.status(401).json({ error: 'Требуется токен доступа' });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-in-production');
-    console.log('🔄 Creating room for user:', decoded.userId);
-
     // Создаем новую игру
     const gameResult = await query(`
       INSERT INTO games (title, gamemode, hostid, maxplayers, totalrounds, isprivate, roompassword, status)
@@ -26,7 +35,7 @@ router.post('/create', async (req, res) => {
     `, [
       title || 'Игровая комната',
       gamemode || 'classic',
-      decoded.userId,
+      req.user.userId,
       maxPlayers || 8,
       totalRounds || 3,
       isPrivate || false,
@@ -40,7 +49,7 @@ router.post('/create', async (req, res) => {
     await query(`
       INSERT INTO game_players (gameid, userid, playerorder, ishost, score, ready)
       VALUES ($1, $2, $3, $4, $5, $6)
-    `, [newGame.gameid, decoded.userId, 1, true, 0, false]);
+    `, [newGame.gameid, req.user.userId, 1, true, 0, false]);
 
     console.log('✅ Host added to game players');
     
@@ -51,9 +60,9 @@ router.post('/create', async (req, res) => {
   } catch (error) {
     console.error('❌ Error creating game:', error);
     
-    if (error.code === '23505') { // unique violation
+    if (error.code === '23505') {
       res.status(400).json({ error: 'Комната с таким названием уже существует' });
-    } else if (error.code === '23503') { // foreign key violation
+    } else if (error.code === '23503') {
       res.status(400).json({ error: 'Пользователь не найден' });
     } else {
       res.status(500).json({ error: 'Ошибка создания комнаты: ' + error.message });
@@ -130,16 +139,8 @@ router.get('/history', async (req, res) => {
 });
 
 // Получить статистику игр
-router.get('/stats', async (req, res) => {
+router.get('/stats', authenticateToken, async (req, res) => {
   try {
-    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
-    
-    if (!token) {
-      return res.status(401).json({ error: 'Требуется токен доступа' });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-in-production');
-
     const statsResult = await query(`
       SELECT 
         COUNT(*) as total_games,
@@ -148,7 +149,7 @@ router.get('/stats', async (req, res) => {
         COUNT(CASE WHEN g.status = 'playing' THEN 1 END) as active_games
       FROM games g
       WHERE g.hostid = $1
-    `, [decoded.userId]);
+    `, [req.user.userId]);
 
     res.json({
       stats: statsResult.rows[0] || { 
@@ -164,13 +165,16 @@ router.get('/stats', async (req, res) => {
   }
 });
 
-// Получение данных комнаты - ИСПРАВЛЕННЫЙ ЭНДПОИНТ
+// Получение данных комнаты
 router.get('/:roomId', async (req, res) => {
   try {
     const { roomId } = req.params;
     console.log('🔄 Fetching room data for:', roomId);
     
-    // Находим комнату
+    if (!roomId || roomId.length < 3) {
+      return res.status(400).json({ error: 'Некорректный ID комнаты' });
+    }
+
     const roomResult = await query(`
       SELECT g.*, u.login as hostname 
       FROM games g 
@@ -183,7 +187,6 @@ router.get('/:roomId', async (req, res) => {
       return res.status(404).json({ error: 'Комната не найдена' });
     }
 
-    // Находим игроков в комнате
     const playersResult = await query(`
       SELECT gp.*, u.login, u.points 
       FROM game_players gp 
@@ -192,7 +195,8 @@ router.get('/:roomId', async (req, res) => {
       ORDER BY gp.playerorder
     `, [roomId]);
 
-    console.log('✅ Room data fetched successfully');
+    console.log('✅ Room data fetched - players:', playersResult.rows.length);
+    
     res.json({
       room: roomResult.rows[0],
       players: playersResult.rows
@@ -203,19 +207,13 @@ router.get('/:roomId', async (req, res) => {
   }
 });
 
-// Присоединение к комнате - ИСПРАВЛЕННЫЙ ЭНДПОИНТ
-router.post('/:roomId/join', async (req, res) => {
+// Присоединение к комнате
+router.post('/:roomId/join', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     const { password } = req.body || {};
-    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
-    if (!token) {
-      return res.status(401).json({ error: 'Требуется токен доступа' });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-in-production');
-    console.log('🔄 User joining room:', decoded.userId, 'to room:', roomId);
+    console.log('🔄 User joining room:', req.user.userId, 'to room:', roomId);
 
     // Проверяем существование комнаты
     const roomResult = await query(`
@@ -242,7 +240,7 @@ router.post('/:roomId/join', async (req, res) => {
     // Проверяем, не присоединился ли уже пользователь
     const existingPlayer = await query(`
       SELECT * FROM game_players WHERE gameid = $1 AND userid = $2
-    `, [roomId, decoded.userId]);
+    `, [roomId, req.user.userId]);
 
     if (existingPlayer.rows.length > 0) {
       return res.status(400).json({ error: 'Вы уже в этой комнате' });
@@ -260,7 +258,7 @@ router.post('/:roomId/join', async (req, res) => {
     await query(`
       INSERT INTO game_players (gameid, userid, playerorder, ishost, score, ready)
       VALUES ($1, $2, $3, $4, $5, $6)
-    `, [roomId, decoded.userId, playerOrder, false, 0, false]);
+    `, [roomId, req.user.userId, playerOrder, false, 0, false]);
 
     // Обновляем счетчик игроков
     await query(`
@@ -278,18 +276,43 @@ router.post('/:roomId/join', async (req, res) => {
   }
 });
 
-// Изменение статуса готовности - ИСПРАВЛЕННЫЙ ЭНДПОИНТ
-router.post('/:roomId/ready', async (req, res) => {
+// Выход из комнаты
+router.post('/:roomId/leave', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
-    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
-    if (!token) {
-      return res.status(401).json({ error: 'Требуется токен доступа' });
+    console.log('🔄 User leaving room:', req.user.userId, 'from room:', roomId);
+
+    // Удаляем игрока
+    const deleteResult = await query(`
+      DELETE FROM game_players 
+      WHERE gameid = $1 AND userid = $2 
+      RETURNING *
+    `, [roomId, req.user.userId]);
+
+    if (deleteResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Игрок не найден в комнате' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-in-production');
-    console.log('🔄 Toggling ready status for user:', decoded.userId, 'in room:', roomId);
+    // Обновляем счетчик игроков
+    await query(`
+      UPDATE games SET currentplayers = currentplayers - 1 WHERE gameid = $1
+    `, [roomId]);
+
+    console.log('✅ User left room successfully');
+    res.json({ success: true, message: 'Вы вышли из комнаты' });
+  } catch (error) {
+    console.error('❌ Error leaving room:', error);
+    res.status(500).json({ error: 'Ошибка выхода из комнаты' });
+  }
+});
+
+// Изменение статуса готовности
+router.post('/:roomId/ready', authenticateToken, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    console.log('🔄 Toggling ready status for user:', req.user.userId, 'in room:', roomId);
 
     // Переключаем статус готовности
     const result = await query(`
@@ -297,7 +320,7 @@ router.post('/:roomId/ready', async (req, res) => {
       SET ready = NOT ready 
       WHERE gameid = $1 AND userid = $2 
       RETURNING *
-    `, [roomId, decoded.userId]);
+    `, [roomId, req.user.userId]);
 
     if (result.rows.length === 0) {
       console.log('❌ Player not found in room');
@@ -312,24 +335,18 @@ router.post('/:roomId/ready', async (req, res) => {
   }
 });
 
-// Начало игры - ИСПРАВЛЕННЫЙ ЭНДПОИНТ
-router.post('/:roomId/start', async (req, res) => {
+// Начало игры
+router.post('/:roomId/start', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
-    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : null;
     
-    if (!token) {
-      return res.status(401).json({ error: 'Требуется токен доступа' });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key-change-in-production');
-    console.log('🔄 Starting game for room:', roomId, 'by user:', decoded.userId);
+    console.log('🔄 Starting game for room:', roomId, 'by user:', req.user.userId);
 
     // Проверяем, что пользователь - хост
     const hostCheck = await query(`
       SELECT ishost FROM game_players 
       WHERE gameid = $1 AND userid = $2 AND ishost = true
-    `, [roomId, decoded.userId]);
+    `, [roomId, req.user.userId]);
 
     if (hostCheck.rows.length === 0) {
       console.log('❌ User is not host');

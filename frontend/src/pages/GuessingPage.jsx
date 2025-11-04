@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import "./GuessingPage.css";
 import { useAuth } from '../context/AuthContext';
@@ -7,41 +7,133 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
   const navigate = useNavigate();
   const { user } = useAuth();
   const [currentGuess, setCurrentGuess] = useState("");
-  const [submitted, setSubmitted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(45);
   const [currentDrawingIndex, setCurrentDrawingIndex] = useState(0);
   const [showHint, setShowHint] = useState(false);
   const [currentDrawing, setCurrentDrawing] = useState(null);
+  const [gameData, setGameData] = useState({});
+  
+  const timerRef = useRef(null);
+  const isMountedRef = useRef(true);
+
+  // Загрузка данных игры в реальном времени
+  const loadGameData = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/game/${roomCode}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (isMountedRef.current) {
+          setGameData(data);
+          
+          // Обновляем таймер с сервера если есть
+          if (data.room?.timeLeft) {
+            setTimeLeft(data.room.timeLeft);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки данных игры:', error);
+    }
+  }, [roomCode]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    
+    // Загружаем данные игры
+    loadGameData();
+    
+    // Обновляем каждые 2 секунды
+    const interval = setInterval(loadGameData, 2000);
+    
+    // WebSocket для реального времени
+    let ws = null;
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/game/${roomCode}`;
+      ws = new WebSocket(wsUrl);
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'GUESS_UPDATE' || data.type === 'TIME_UPDATE') {
+          loadGameData();
+        }
+      };
+    } catch (error) {
+      console.log('WebSocket не поддерживается, используем polling');
+    }
+
+    return () => {
+      isMountedRef.current = false;
+      clearInterval(interval);
+      if (ws) ws.close();
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [loadGameData, roomCode]);
 
   useEffect(() => {
     if (drawings.length > 0 && currentDrawingIndex < drawings.length) {
       setCurrentDrawing(drawings[currentDrawingIndex]);
       setCurrentGuess("");
-      setSubmitted(false);
       setShowHint(false);
       setTimeLeft(45);
     }
   }, [currentDrawingIndex, drawings]);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (currentGuess.trim() && currentDrawing) {
-      setSubmitted(true);
-      if (onSubmitGuess) {
-        onSubmitGuess(currentGuess.trim(), currentDrawingIndex);
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/game/${roomCode}/guess`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            guess: currentGuess.trim(),
+            drawingIndex: currentDrawingIndex
+          })
+        });
+
+        if (response.ok) {
+          console.log('✅ Догадка отправлена');
+          if (onSubmitGuess) {
+            onSubmitGuess(currentGuess.trim(), currentDrawingIndex);
+          }
+        } else {
+          alert('Ошибка отправки догадки');
+        }
+      } catch (error) {
+        console.error('Ошибка:', error);
+        alert('Ошибка отправки догадки');
       }
     } else {
       alert("Пожалуйста, введите вашу догадку!");
     }
-  }, [currentGuess, currentDrawing, onSubmitGuess, currentDrawingIndex]);
+  }, [currentGuess, currentDrawing, onSubmitGuess, currentDrawingIndex, roomCode]);
 
+  // Таймер на клиенте как fallback
   useEffect(() => {
-    if (timeLeft > 0 && !submitted && currentDrawing) {
-      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
-      return () => clearTimeout(timer);
-    } else if (timeLeft === 0 && !submitted && currentDrawing) {
+    if (timeLeft > 0 && currentDrawing) {
+      timerRef.current = setTimeout(() => {
+        if (isMountedRef.current) {
+          setTimeLeft(prev => prev - 1);
+        }
+      }, 1000);
+    } else if (timeLeft === 0 && currentDrawing) {
       handleSubmit();
     }
-  }, [timeLeft, submitted, currentDrawing, handleSubmit]);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [timeLeft, currentDrawing, handleSubmit]);
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
@@ -56,32 +148,44 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
   };
 
   const getPlayerStatus = (player) => {
-    return player.userid === user?.userid && submitted ? "submitted" : "guessing";
+    // Используем данные с сервера о статусе игрока
+    if (player.hasGuessed || player.guessed) {
+      return "submitted";
+    }
+    return "guessing";
   };
 
   const nextDrawing = () => {
     if (currentDrawingIndex < drawings.length - 1) {
       setCurrentDrawingIndex(prev => prev + 1);
     } else {
-      alert("🎉 Все рисунки угаданы! Переходим к результатам.");
+      // Переходим к результатам
+      navigate(`/room/${roomCode}/results`);
     }
   };
 
   const quickGuesses = ["Кот", "Собака", "Дом", "Машина", "Дерево", "Солнце", "Человек", "Птица"];
 
-  if (!currentDrawing || drawings.length === 0) {
+  // Используем актуальных игроков из gameData или из пропсов
+  const actualPlayers = gameData.players || players;
+  const actualDrawings = gameData.drawings || drawings;
+
+  if (!currentDrawing || actualDrawings.length === 0) {
     return (
       <div className="guess-container">
         <div className="guess-loading-message">
-          Загрузка рисунков...
+          🔄 Загрузка рисунков...
         </div>
       </div>
     );
   }
 
+  // Проверяем отправил ли текущий пользователь догадку
+  const currentPlayer = actualPlayers.find(p => p.userid === user?.userid);
+  const hasSubmitted = currentPlayer ? getPlayerStatus(currentPlayer) === "submitted" : false;
+
   return (
     <div className="guess-container">
-      {/* Шапка */}
       <header className="guess-header">
         <button className="guess-back-button" onClick={() => navigate(-1)}>
           ← Назад
@@ -89,7 +193,7 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
         <div className="guess-title">
           <h1>🎯 Время угадывать!</h1>
           <div className="guess-room-info">
-            Комната: {roomCode} | Рисунок {currentDrawingIndex + 1} из {drawings.length}
+            Комната: {roomCode} | Рисунок {currentDrawingIndex + 1} из {actualDrawings.length}
           </div>
         </div>
         <div className="guess-timer-section">
@@ -100,9 +204,7 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
       </header>
 
       <div className="guess-content">
-        {/* Левая панель - управление */}
         <div className="guess-control-panel">
-          {/* Блок ввода догадки */}
           <div className="guess-input-card">
             <h3>💭 Ваша догадка</h3>
             <div className="guess-input-wrapper">
@@ -113,7 +215,7 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
                 onKeyPress={handleKeyPress}
                 placeholder="Что изображено на рисунке?"
                 maxLength={50}
-                disabled={submitted}
+                disabled={hasSubmitted}
                 className="guess-input"
               />
               <div className="guess-char-counter">
@@ -121,7 +223,7 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
               </div>
             </div>
             
-            {!submitted ? (
+            {!hasSubmitted ? (
               <button
                 onClick={handleSubmit}
                 disabled={!currentGuess.trim()}
@@ -140,13 +242,12 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
             )}
           </div>
 
-          {/* Блок подсказки */}
           <div className="guess-hint-card">
             <h4>💡 Подсказка</h4>
             <button 
               className={`guess-hint-button ${showHint ? 'active' : ''}`}
               onClick={() => setShowHint(!showHint)}
-              disabled={submitted}
+              disabled={hasSubmitted}
             >
               {showHint ? '👁️ Скрыть подсказку' : '🔍 Показать подсказку'}
             </button>
@@ -157,7 +258,6 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
             )}
           </div>
 
-          {/* Быстрые варианты */}
           <div className="guess-quick-card">
             <h4>⚡ Быстрые варианты</h4>
             <div className="guess-quick-grid">
@@ -166,7 +266,7 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
                   key={index}
                   className="guess-quick-item"
                   onClick={() => setCurrentGuess(word)}
-                  disabled={submitted}
+                  disabled={hasSubmitted}
                 >
                   {word}
                 </button>
@@ -174,8 +274,7 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
             </div>
           </div>
 
-          {/* Следующий рисунок */}
-          {submitted && currentDrawingIndex < drawings.length - 1 && (
+          {hasSubmitted && currentDrawingIndex < actualDrawings.length - 1 && (
             <div className="guess-next-card">
               <button className="guess-next-button" onClick={nextDrawing}>
                 ⏭️ Следующий рисунок
@@ -184,9 +283,7 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
           )}
         </div>
 
-        {/* Центральная панель - рисунок */}
         <div className="guess-main-panel">
-          {/* Информация о художнике */}
           <div className="guess-artist-info">
             <div className="guess-artist-badge">
               <div className="guess-artist-avatar">🎨</div>
@@ -197,7 +294,6 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
             </div>
           </div>
 
-          {/* Область рисунка */}
           <div className="guess-drawing-space">
             <div className="guess-drawing-frame">
               <img 
@@ -212,7 +308,6 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
             </div>
           </div>
 
-          {/* Прогресс времени */}
           <div className="guess-time-progress">
             <div className="guess-time-text">
               Осталось времени: <span className="guess-time-value">{formatTime(timeLeft)}</span>
@@ -226,31 +321,28 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
           </div>
         </div>
 
-        {/* Правая панель - игроки */}
         <div className="guess-players-panel">
-          <h3>👥 Игроки онлайн</h3>
+          <h3>👥 Игроки онлайн ({actualPlayers.length})</h3>
           
-          {/* Прогресс угадывания */}
           <div className="guess-stats-card">
             <div className="guess-stats-header">
               <span>Прогресс угадывания</span>
               <span className="guess-stats-count">
-                {players.filter(p => getPlayerStatus(p) === 'submitted').length}/{players.length}
+                {actualPlayers.filter(p => getPlayerStatus(p) === 'submitted').length}/{actualPlayers.length}
               </span>
             </div>
             <div className="guess-stats-progress">
               <div 
                 className="guess-stats-fill" 
                 style={{ 
-                  width: `${(players.filter(p => getPlayerStatus(p) === 'submitted').length / Math.max(players.length, 1)) * 100}%` 
+                  width: `${(actualPlayers.filter(p => getPlayerStatus(p) === 'submitted').length / Math.max(actualPlayers.length, 1)) * 100}%` 
                 }}
               />
             </div>
           </div>
 
-          {/* Список игроков */}
           <div className="guess-players-list">
-            {players.map((player) => (
+            {actualPlayers.map((player) => (
               <div key={player.userid} className={`guess-player-card ${getPlayerStatus(player)}`}>
                 <div className="guess-player-avatar">
                   {player.login?.charAt(0).toUpperCase() || '?'}
@@ -272,7 +364,6 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
             ))}
           </div>
 
-          {/* Статистика раунда */}
           <div className="guess-round-stats">
             <h4>📊 Статистика раунда</h4>
             <div className="guess-stats-grid">
@@ -281,7 +372,7 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
                 <div className="guess-stat-label">Текущий</div>
               </div>
               <div className="guess-stat-box">
-                <div className="guess-stat-number">{drawings.length}</div>
+                <div className="guess-stat-number">{actualDrawings.length}</div>
                 <div className="guess-stat-label">Всего</div>
               </div>
               <div className="guess-stat-box">
