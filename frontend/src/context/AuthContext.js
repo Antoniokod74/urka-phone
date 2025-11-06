@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const AuthContext = createContext();
 
@@ -12,14 +12,13 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Функция для проверки валидности токена
-  const checkAuth = async () => {
+  const checkAuth = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
       if (!token) {
-        setLoading(false);
         return null;
       }
 
@@ -33,23 +32,20 @@ export const AuthProvider = ({ children }) => {
       if (response.ok) {
         const data = await response.json();
         setUser(data.user);
+        setIsAuthenticated(true);
         localStorage.setItem('user', JSON.stringify(data.user));
         return data.user;
       } else {
-        // Токен невалидный, очищаем хранилище
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
+        if (response.status === 401 || response.status === 403) {
+          logout();
+        }
         return null;
       }
     } catch (error) {
       console.error('❌ Auth check error:', error);
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      setUser(null);
       return null;
     }
-  };
+  }, []);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -58,22 +54,19 @@ export const AuthProvider = ({ children }) => {
       
       if (token && userData) {
         try {
-          // Проверяем валидность токена на сервере
           await checkAuth();
         } catch (error) {
           console.error('Error initializing auth:', error);
         }
       }
-      setLoading(false);
+      setIsLoading(false);
     };
 
     initAuth();
-  }, []);
+  }, [checkAuth]);
 
   const register = async (userData) => {
     try {
-      console.log('🔄 Registering user:', { ...userData, password: '***' });
-      
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: {
@@ -88,11 +81,10 @@ export const AuthProvider = ({ children }) => {
         throw new Error(data.error || 'Registration failed');
       }
       
-      console.log('✅ Registration successful:', data);
-      
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       setUser(data.user);
+      setIsAuthenticated(true);
       
       return data;
     } catch (error) {
@@ -103,8 +95,6 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (userData) => {
     try {
-      console.log('🔄 Logging in user:', { ...userData, password: '***' });
-      
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
@@ -122,6 +112,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       setUser(data.user);
+      setIsAuthenticated(true);
       
       return data;
     } catch (error) {
@@ -134,9 +125,9 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);
+    setIsAuthenticated(false);
   };
 
-  // Функция для обновления статистики пользователя
   const updateUserStats = async (stats) => {
     try {
       const token = localStorage.getItem('token');
@@ -157,17 +148,13 @@ export const AuthProvider = ({ children }) => {
         throw new Error(data.error || 'Failed to update stats');
       }
       
-      // Обновляем пользователя в состоянии
-      setUser(prevUser => ({
-        ...prevUser,
-        ...data.user
-      }));
-      
-      // Обновляем в localStorage
-      localStorage.setItem('user', JSON.stringify({
+      const updatedUser = {
         ...user,
         ...data.user
-      }));
+      };
+      
+      setUser(updatedUser);
+      localStorage.setItem('user', JSON.stringify(updatedUser));
       
       return data;
     } catch (error) {
@@ -176,12 +163,10 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Функция для принудительной проверки аутентификации
   const refreshUser = async () => {
     return await checkAuth();
   };
 
-  // Функция для увеличения статистики (удобная обертка)
   const incrementStats = async (gameWon = false, pointsEarned = 0) => {
     const updates = {
       gamesplayed: (user?.gamesplayed || 0) + 1,
@@ -192,7 +177,6 @@ export const AuthProvider = ({ children }) => {
     return await updateUserStats(updates);
   };
 
-  // Функция для сброса статистики
   const resetStats = async () => {
     return await updateUserStats({
       gamesplayed: 0,
@@ -210,8 +194,8 @@ export const AuthProvider = ({ children }) => {
     incrementStats,
     resetStats,
     refreshUser,
-    loading,
-    isAuthenticated: !!user
+    loading: isLoading,
+    isAuthenticated
   };
 
   return (
