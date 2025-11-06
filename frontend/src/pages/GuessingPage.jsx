@@ -16,8 +16,19 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
   const timerRef = useRef(null);
   const isMountedRef = useRef(true);
 
+  // ✅ ДОБАВЛЕНА ПРОВЕРКА roomCode
+  const isValidRoomCode = useCallback(() => {
+    return roomCode && roomCode !== 'undefined' && roomCode !== 'null' && roomCode !== '';
+  }, [roomCode]);
+
   // Загрузка данных игры в реальном времени
   const loadGameData = useCallback(async () => {
+    // ✅ ПРОВЕРКА roomCode
+    if (!isValidRoomCode()) {
+      console.error('❌ Invalid roomCode in loadGameData:', roomCode);
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`/api/game/${roomCode}`, {
@@ -40,9 +51,15 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
     } catch (error) {
       console.error('Ошибка загрузки данных игры:', error);
     }
-  }, [roomCode]);
+  }, [roomCode, isValidRoomCode]);
 
   useEffect(() => {
+    // ✅ ПРОВЕРКА roomCode
+    if (!isValidRoomCode()) {
+      console.error('❌ Invalid roomCode in useEffect:', roomCode);
+      return;
+    }
+
     isMountedRef.current = true;
     
     // Загружаем данные игры
@@ -74,7 +91,7 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
       if (ws) ws.close();
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [loadGameData, roomCode]);
+  }, [loadGameData, roomCode, isValidRoomCode]);
 
   useEffect(() => {
     if (drawings.length > 0 && currentDrawingIndex < drawings.length) {
@@ -86,6 +103,13 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
   }, [currentDrawingIndex, drawings]);
 
   const handleSubmit = useCallback(async () => {
+    // ✅ ПРОВЕРКА roomCode
+    if (!isValidRoomCode()) {
+      console.error('❌ Invalid roomCode in handleSubmit:', roomCode);
+      alert('Некорректный ID комнаты');
+      return;
+    }
+
     if (currentGuess.trim() && currentDrawing) {
       try {
         const token = localStorage.getItem('token');
@@ -116,7 +140,7 @@ export default function GuessingPage({ drawings = [], players = [], roomCode, on
     } else {
       alert("Пожалуйста, введите вашу догадку!");
     }
-  }, [currentGuess, currentDrawing, onSubmitGuess, currentDrawingIndex, roomCode]);
+  }, [currentGuess, currentDrawing, onSubmitGuess, currentDrawingIndex, roomCode, isValidRoomCode]);
 
   // Таймер на клиенте как fallback
   useEffect(() => {

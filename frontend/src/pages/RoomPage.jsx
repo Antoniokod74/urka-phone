@@ -18,81 +18,91 @@ function RoomPage() {
   const mountedRef = useRef(true);
 
   // Загрузка данных комнаты и игроков
-  const loadRoomData = useCallback(async () => {
-    if (isLoadingRef.current || !mountedRef.current) return;
+const loadRoomData = useCallback(async () => {
+  // ✅ ДОБАВЬ ЭТУ ПРОВЕРКУ В НАЧАЛЕ:
+  if (!roomId || roomId === 'undefined' || roomId === 'null' || roomId === '') {
+    console.error('❌ Invalid roomId in RoomPage:', roomId);
+    if (mountedRef.current) {
+      setError('Некорректный ID комнаты');
+      setLoading(false);
+    }
+    return;
+  }
+
+  if (isLoadingRef.current || !mountedRef.current) return;
+  
+  isLoadingRef.current = true;
+  try {
+    const token = localStorage.getItem('token');
+    console.log('🔄 Загружаем данные комнаты:', roomId);
     
-    isLoadingRef.current = true;
-    try {
-      const token = localStorage.getItem('token');
-      console.log('🔄 Загружаем данные комнаты:', roomId);
-      
-      const response = await fetch(`/api/game/${roomId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Ошибка ${response.status}: ${errorText}`);
+    const response = await fetch(`/api/game/${roomId}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
       }
+    });
 
-      const data = await response.json();
-      console.log('✅ Данные комнаты:', data);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Ошибка ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log('✅ Данные комнаты:', data);
+    
+    if (!data.room) {
+      throw new Error('Некорректный формат данных комнаты');
+    }
+    
+    if (mountedRef.current) {
+      setRoomInfo(data.room);
+      setPlayers(data.players || []);
+      setError('');
+    }
+    
+  } catch (error) {
+    console.error('❌ Ошибка загрузки комнаты:', error);
+    
+    if (mountedRef.current) {
+      setError(`Не удалось загрузить данные комнаты: ${error.message}`);
       
-      if (!data.room) {
-        throw new Error('Некорректный формат данных комнаты');
-      }
-      
-      if (mountedRef.current) {
-        setRoomInfo(data.room);
-        setPlayers(data.players || []);
+      // Используем мок-данные только если комната не найдена (404)
+      if (error.message.includes('404') || error.message.includes('не найдена')) {
+        console.log('🎮 Используем тестовые данные');
+        const mockRoomData = {
+          room: {
+            gameid: roomId,
+            title: `Комната ${roomId}`,
+            gamemode: 'classic',
+            status: 'waiting',
+            maxplayers: 8,
+            currentplayers: 1,
+            currentround: 1,
+            totalrounds: 3,
+            createdat: new Date().toISOString()
+          },
+          players: [
+            {
+              userid: user?.userid || 1,
+              login: user?.login || 'Тестовый игрок',
+              ishost: true,
+              ready: false,
+              score: 0
+            }
+          ]
+        };
+        setRoomInfo(mockRoomData.room);
+        setPlayers(mockRoomData.players);
         setError('');
       }
-      
-    } catch (error) {
-      console.error('❌ Ошибка загрузки комнаты:', error);
-      
-      if (mountedRef.current) {
-        setError(`Не удалось загрузить данные комнаты: ${error.message}`);
-        
-        // Используем мок-данные только если комната не найдена (404)
-        if (error.message.includes('404') || error.message.includes('не найдена')) {
-          console.log('🎮 Используем тестовые данные');
-          const mockRoomData = {
-            room: {
-              gameid: roomId,
-              title: `Комната ${roomId}`,
-              gamemode: 'classic',
-              status: 'waiting',
-              maxplayers: 8,
-              currentplayers: 1,
-              currentround: 1,
-              totalrounds: 3,
-              createdat: new Date().toISOString()
-            },
-            players: [
-              {
-                userid: user?.userid || 1,
-                login: user?.login || 'Тестовый игрок',
-                ishost: true,
-                ready: false,
-                score: 0
-              }
-            ]
-          };
-          setRoomInfo(mockRoomData.room);
-          setPlayers(mockRoomData.players);
-          setError('');
-        }
-      }
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
-      isLoadingRef.current = false;
     }
-  }, [roomId, user]);
+  } finally {
+    if (mountedRef.current) {
+      setLoading(false);
+    }
+    isLoadingRef.current = false;
+  }
+}, [roomId, user]);
 
   useEffect(() => {
     mountedRef.current = true;

@@ -20,8 +20,19 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
     "Динозавр", "Корабль", "Сердце", "Корона", "Дракон"
   ];
 
+  // ✅ ДОБАВЛЕНА ПРОВЕРКА roomCode
+  const isValidRoomCode = useCallback(() => {
+    return roomCode && roomCode !== 'undefined' && roomCode !== 'null' && roomCode !== '';
+  }, [roomCode]);
+
   // Загрузка данных игры в реальном времени
   const loadGameData = useCallback(async () => {
+    // ✅ ПРОВЕРКА roomCode
+    if (!isValidRoomCode()) {
+      console.error('❌ Invalid roomCode in loadGameData:', roomCode);
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`/api/game/${roomCode}`, {
@@ -50,9 +61,15 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
     } catch (error) {
       console.error('Ошибка загрузки данных игры:', error);
     }
-  }, [roomCode, user]);
+  }, [roomCode, user, isValidRoomCode]);
 
   useEffect(() => {
+    // ✅ ПРОВЕРКА roomCode
+    if (!isValidRoomCode()) {
+      console.error('❌ Invalid roomCode in useEffect:', roomCode);
+      return;
+    }
+
     isMountedRef.current = true;
     
     // Загружаем данные игры
@@ -91,7 +108,7 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
       if (ws) ws.close();
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [loadGameData, roomCode, onSubmitWords, word]);
+  }, [loadGameData, roomCode, onSubmitWords, word, isValidRoomCode]);
 
   // Таймер на клиенте как fallback
   useEffect(() => {
@@ -111,6 +128,13 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
   }, [timeLeft, submitted]);
 
   const handleSubmit = async () => {
+    // ✅ ПРОВЕРКА roomCode
+    if (!isValidRoomCode()) {
+      console.error('❌ Invalid roomCode in handleSubmit:', roomCode);
+      alert('Некорректный ID комнаты');
+      return;
+    }
+
     if (word.trim()) {
       try {
         // Отправляем слово на сервер
@@ -145,6 +169,12 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
   };
 
   const handleAutoSubmit = async () => {
+    // ✅ ПРОВЕРКА roomCode
+    if (!isValidRoomCode()) {
+      console.error('❌ Invalid roomCode in handleAutoSubmit:', roomCode);
+      return;
+    }
+
     let finalWord = word.trim();
     if (!finalWord) {
       finalWord = wordPrompts[Math.floor(Math.random() * wordPrompts.length)];

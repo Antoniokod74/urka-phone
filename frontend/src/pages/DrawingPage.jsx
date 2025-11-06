@@ -30,8 +30,19 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
 
   const brushSizes = [2, 5, 10, 15, 20];
 
+  // ✅ ДОБАВЛЕНА ПРОВЕРКА roomCode
+  const isValidRoomCode = useCallback(() => {
+    return roomCode && roomCode !== 'undefined' && roomCode !== 'null' && roomCode !== '';
+  }, [roomCode]);
+
   // Загрузка данных игры в реальном времени
   const loadGameData = useCallback(async () => {
+    // ✅ ПРОВЕРКА roomCode
+    if (!isValidRoomCode()) {
+      console.error('❌ Invalid roomCode in loadGameData:', roomCode);
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`/api/game/${roomCode}`, {
@@ -59,9 +70,15 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
     } catch (error) {
       console.error('Ошибка загрузки данных игры:', error);
     }
-  }, [roomCode]);
+  }, [roomCode, isValidRoomCode]);
 
   useEffect(() => {
+    // ✅ ПРОВЕРКА roomCode
+    if (!isValidRoomCode()) {
+      console.error('❌ Invalid roomCode in useEffect:', roomCode);
+      return;
+    }
+
     isMountedRef.current = true;
     
     // Загружаем данные игры
@@ -98,9 +115,15 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
       if (ws) ws.close();
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [loadGameData, roomCode]);
+  }, [loadGameData, roomCode, isValidRoomCode]);
 
   const handleTimeUp = useCallback(async () => {
+    // ✅ ПРОВЕРКА roomCode
+    if (!isValidRoomCode()) {
+      console.error('❌ Invalid roomCode in handleTimeUp:', roomCode);
+      return;
+    }
+
     const canvas = canvasRef.current;
     const drawingData = canvas.toDataURL();
     
@@ -132,7 +155,7 @@ export default function DrawingPage({ words = [], players = [], roomCode, onDraw
     } catch (error) {
       console.error('❌ Ошибка:', error);
     }
-  }, [onDrawingComplete, roomCode, currentWord]);
+  }, [onDrawingComplete, roomCode, currentWord, isValidRoomCode]);
 
   useEffect(() => {
     if (words.length > 0) {
