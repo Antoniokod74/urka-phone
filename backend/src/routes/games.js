@@ -171,9 +171,6 @@ router.get('/:roomId', async (req, res) => {
     const { roomId } = req.params;
     console.log('🔄 Fetching room data for:', roomId);
     
-    if (!roomId || roomId.length < 3) {
-      return res.status(400).json({ error: 'Некорректный ID комнаты' });
-    }
 
     const roomResult = await query(`
       SELECT g.*, u.login as hostname 
