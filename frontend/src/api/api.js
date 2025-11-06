@@ -77,11 +77,20 @@ export const gameAPI = {
     body: gameData,
   }),
   
-  getHistory: () => apiRequest('/game/history'),
-  
   getActiveRooms: () => apiRequest('/game/active-rooms'),
   
+  getHistory: () => apiRequest('/game/history'),
+  
   getStats: () => apiRequest('/game/stats'),
+
+  // ✅ ДОБАВЛЕНО: Получение данных комнаты
+  getRoomData: (roomId) => {
+    if (!roomId || roomId === 'undefined' || roomId === 'null') {
+      console.error('❌ Invalid roomId in API call:', roomId);
+      return Promise.reject(new Error('Некорректный ID комнаты'));
+    }
+    return apiRequest(`/game/${roomId}`);
+  },
   
   testConnection: () => apiRequest('/test-db'),
 };

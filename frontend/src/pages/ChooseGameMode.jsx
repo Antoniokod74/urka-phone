@@ -135,12 +135,26 @@ export default function ChooseGameMode() {
       setLoading(true);
       setError('');
       
-      // Переход на страницу комнаты по коду
-      navigate(`/room/${roomCode.trim()}`);
+      // ✅ ИСПРАВЛЕНО: Проверяем комнату перед переходом
+      console.log('🔄 Проверяем комнату:', roomCode.trim());
+      const response = await gameAPI.getRoomData(roomCode.trim());
+      
+      if (response.data && response.data.room) {
+        console.log('✅ Комната найдена, переходим...');
+        navigate(`/room/${roomCode.trim()}`);
+      } else {
+        setError('Комната не найдена');
+      }
 
     } catch (error) {
       console.error('❌ Ошибка присоединения:', error);
-      setError(`Ошибка присоединения: ${error.message}`);
+      if (error.message.includes('400') || error.message.includes('Некорректный ID')) {
+        setError('Некорректный ID комнаты');
+      } else if (error.message.includes('404')) {
+        setError('Комната не найдена');
+      } else {
+        setError(`Ошибка присоединения: ${error.message}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -154,12 +168,27 @@ export default function ChooseGameMode() {
 
     try {
       setError('');
-      // Переход на страницу комнаты
-      navigate(`/room/${roomId}`);
+      
+      // ✅ ИСПРАВЛЕНО: Проверяем комнату перед переходом
+      console.log('🔄 Проверяем комнату:', roomId);
+      const response = await gameAPI.getRoomData(roomId);
+      
+      if (response.data && response.data.room) {
+        console.log('✅ Комната найдена, переходим...');
+        navigate(`/room/${roomId}`);
+      } else {
+        setError('Комната не найдена');
+      }
 
     } catch (error) {
       console.error('❌ Ошибка присоединения:', error);
-      setError(`Ошибка присоединения: ${error.message}`);
+      if (error.message.includes('400') || error.message.includes('Некорректный ID')) {
+        setError('Некорректный ID комнаты');
+      } else if (error.message.includes('404')) {
+        setError('Комната не найдена');
+      } else {
+        setError(`Ошибка присоединения: ${error.message}`);
+      }
     }
   };
 
