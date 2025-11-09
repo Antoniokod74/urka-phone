@@ -383,7 +383,7 @@ router.post('/:roomId/start', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ДОБАВЛЕНО: Отправка слова
+// ✅ ИСПРАВЛЕНО: Отправка слова (сохраняем в таблицу round_phrases)
 router.post('/:roomId/word', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -392,7 +392,7 @@ router.post('/:roomId/word', authenticateToken, async (req, res) => {
     
     console.log('📝 Получено слово для комнаты:', roomId, 'от пользователя:', userId, 'слово:', word);
 
-    // Проверяем существование комнаты
+    // Проверяем существование комнаты и получаем текущий раунд
     const roomResult = await query(`
       SELECT * FROM games WHERE gameid = $1 AND status = 'playing'
     `, [roomId]);
@@ -400,6 +400,9 @@ router.post('/:roomId/word', authenticateToken, async (req, res) => {
     if (roomResult.rows.length === 0) {
       return res.status(404).json({ error: 'Комната не найдена или игра не начата' });
     }
+
+    const room = roomResult.rows[0];
+    const currentRound = room.currentround;
 
     // Проверяем что пользователь в комнате
     const playerResult = await query(`
@@ -410,19 +413,52 @@ router.post('/:roomId/word', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Вы не в этой комнате' });
     }
 
-    // ✅ ВРЕМЕННОЕ РЕШЕНИЕ - просто отмечаем что слово отправлено
-    await query(`
-      UPDATE game_players 
-      SET hassubmittedword = true 
-      WHERE gameid = $1 AND userid = $2
-    `, [roomId, userId]);
+    // Получаем или создаем roundid для текущего раунда
+    const roundResult = await query(`
+      SELECT roundid FROM rounds 
+      WHERE gameid = $1 AND roundnumber = $2
+    `, [roomId, currentRound]);
 
-    console.log('✅ Слово принято (временное решение):', word);
+    let roundId;
+    
+    if (roundResult.rows.length === 0) {
+      // Создаем новый раунд если не существует
+      const newRoundResult = await query(`
+        INSERT INTO rounds (gameid, roundnumber, status)
+        VALUES ($1, $2, 'collecting')
+        RETURNING roundid
+      `, [roomId, currentRound]);
+      
+      roundId = newRoundResult.rows[0].roundid;
+      console.log('✅ Создан новый раунд:', roundId);
+    } else {
+      roundId = roundResult.rows[0].roundid;
+    }
+
+    // Проверяем, не отправил ли уже пользователь слово в этом раунде
+    const existingPhrase = await query(`
+      SELECT * FROM round_phrases 
+      WHERE roundid = $1 AND userid = $2
+    `, [roundId, userId]);
+
+    if (existingPhrase.rows.length > 0) {
+      return res.status(400).json({ error: 'Вы уже отправили слово в этом раунде' });
+    }
+
+    // ✅ СОХРАНЯЕМ СЛОВО В ТАБЛИЦУ round_phrases
+    const phraseResult = await query(`
+      INSERT INTO round_phrases (roundid, userid, phrase)
+      VALUES ($1, $2, $3)
+      RETURNING phraseid
+    `, [roundId, userId, word]);
+
+    console.log('✅ Слово сохранено в round_phrases с ID:', phraseResult.rows[0].phraseid);
     
     res.json({
       success: true,
       message: 'Слово успешно отправлено',
-      word: word
+      word: word,
+      roundId: roundId
     });
 
   } catch (error) {
@@ -431,19 +467,40 @@ router.post('/:roomId/word', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ДОБАВЛЕНО: Получение статуса слов
+// ✅ ИСПРАВЛЕНО: Получение статуса слов (проверяем таблицу round_phrases)
 router.get('/:roomId/words-status', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     
     console.log('🔄 Получаем статус слов для комнаты:', roomId);
 
-    // Получаем всех игроков и их статус отправки слов
+    // Получаем текущий раунд комнаты
+    const roomResult = await query(`
+      SELECT currentround FROM games WHERE gameid = $1
+    `, [roomId]);
+
+    if (roomResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Комната не найдена' });
+    }
+
+    const currentRound = roomResult.rows[0].currentround;
+
+    // Получаем roundid для текущего раунда
+    const roundResult = await query(`
+      SELECT roundid FROM rounds 
+      WHERE gameid = $1 AND roundnumber = $2
+    `, [roomId, currentRound]);
+
+    let roundId = null;
+    if (roundResult.rows.length > 0) {
+      roundId = roundResult.rows[0].roundid;
+    }
+
+    // Получаем всех игроков комнаты
     const playersResult = await query(`
       SELECT 
         gp.userid,
         u.login,
-        gp.hassubmittedword,
         gp.ready
       FROM game_players gp
       LEFT JOIN users u ON gp.userid = u.userid
@@ -451,16 +508,44 @@ router.get('/:roomId/words-status', authenticateToken, async (req, res) => {
       ORDER BY gp.playerorder
     `, [roomId]);
 
-    const submittedCount = playersResult.rows.filter(p => p.hassubmittedword).length;
-    const totalPlayers = playersResult.rows.length;
+    // Получаем отправленные слова для текущего раунда
+    let submittedWords = [];
+    if (roundId) {
+      const wordsResult = await query(`
+        SELECT userid, phrase 
+        FROM round_phrases 
+        WHERE roundid = $1
+      `, [roundId]);
+      
+      submittedWords = wordsResult.rows;
+    }
+
+    // Формируем ответ с информацией о статусе отправки слов
+    const playersWithStatus = playersResult.rows.map(player => {
+      const hasSubmitted = submittedWords.some(word => word.userid === player.userid);
+      const userWord = submittedWords.find(word => word.userid === player.userid);
+      
+      return {
+        userid: player.userid,
+        login: player.login,
+        hassubmittedword: hasSubmitted,
+        submitted_word: userWord ? userWord.phrase : null,
+        ready: player.ready
+      };
+    });
+
+    const submittedCount = playersWithStatus.filter(p => p.hassubmittedword).length;
+    const totalPlayers = playersWithStatus.length;
 
     console.log('✅ Статус слов:', submittedCount + '/' + totalPlayers);
     
     res.json({
-      players: playersResult.rows,
+      players: playersWithStatus,
       submittedCount: submittedCount,
       totalPlayers: totalPlayers,
-      allSubmitted: submittedCount === totalPlayers && totalPlayers > 0
+      allSubmitted: submittedCount === totalPlayers && totalPlayers > 0,
+      currentRound: currentRound,
+      roundId: roundId
     });
 
   } catch (error) {
