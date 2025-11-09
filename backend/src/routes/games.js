@@ -383,4 +383,90 @@ router.post('/:roomId/start', authenticateToken, async (req, res) => {
   }
 });
 
+// ✅ ДОБАВЛЕНО: Отправка слова
+router.post('/:roomId/word', authenticateToken, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const { word } = req.body;
+    const userId = req.user.userId;
+    
+    console.log('📝 Получено слово для комнаты:', roomId, 'от пользователя:', userId, 'слово:', word);
+
+    // Проверяем существование комнаты
+    const roomResult = await query(`
+      SELECT * FROM games WHERE gameid = $1 AND status = 'playing'
+    `, [roomId]);
+
+    if (roomResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Комната не найдена или игра не начата' });
+    }
+
+    // Проверяем что пользователь в комнате
+    const playerResult = await query(`
+      SELECT * FROM game_players WHERE gameid = $1 AND userid = $2
+    `, [roomId, userId]);
+
+    if (playerResult.rows.length === 0) {
+      return res.status(403).json({ error: 'Вы не в этой комнате' });
+    }
+
+    // ✅ ВРЕМЕННОЕ РЕШЕНИЕ - просто отмечаем что слово отправлено
+    await query(`
+      UPDATE game_players 
+      SET hassubmittedword = true 
+      WHERE gameid = $1 AND userid = $2
+    `, [roomId, userId]);
+
+    console.log('✅ Слово принято (временное решение):', word);
+    
+    res.json({
+      success: true,
+      message: 'Слово успешно отправлено',
+      word: word
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка сохранения слова:', error);
+    res.status(500).json({ error: 'Ошибка сохранения слова: ' + error.message });
+  }
+});
+
+// ✅ ДОБАВЛЕНО: Получение статуса слов
+router.get('/:roomId/words-status', authenticateToken, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    console.log('🔄 Получаем статус слов для комнаты:', roomId);
+
+    // Получаем всех игроков и их статус отправки слов
+    const playersResult = await query(`
+      SELECT 
+        gp.userid,
+        u.login,
+        gp.hassubmittedword,
+        gp.ready
+      FROM game_players gp
+      LEFT JOIN users u ON gp.userid = u.userid
+      WHERE gp.gameid = $1
+      ORDER BY gp.playerorder
+    `, [roomId]);
+
+    const submittedCount = playersResult.rows.filter(p => p.hassubmittedword).length;
+    const totalPlayers = playersResult.rows.length;
+
+    console.log('✅ Статус слов:', submittedCount + '/' + totalPlayers);
+    
+    res.json({
+      players: playersResult.rows,
+      submittedCount: submittedCount,
+      totalPlayers: totalPlayers,
+      allSubmitted: submittedCount === totalPlayers && totalPlayers > 0
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка получения статуса слов:', error);
+    res.status(500).json({ error: 'Ошибка получения статуса слов' });
+  }
+});
+
 module.exports = router;
