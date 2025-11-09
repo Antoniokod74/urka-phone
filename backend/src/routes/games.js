@@ -400,7 +400,7 @@ router.post('/:roomId/start', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ ОТПРАВКИ СЛОВА
+// ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ ОТПРАВКИ СЛОВА - УПРОЩЕННАЯ ВЕРСИЯ
 router.post('/:roomId/word', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -423,29 +423,40 @@ router.post('/:roomId/word', authenticateToken, async (req, res) => {
     
     console.log('🔍 Поиск раунда для комнаты:', roomId, 'раунд:', room.currentround);
 
-    // Получаем или создаем раунд - УПРОЩЕННАЯ ВЕРСИЯ
+    // ПРОСТАЯ ЛОГИКА: всегда создаем раунд если его нет
     let roundResult = await query(`SELECT * FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, room.currentround]);
     let roundId;
 
     if (roundResult.rows.length === 0) {
       console.log('🔄 Раунд не найден, создаем новый...');
-      // Создаем раунд
       try {
-        const newRound = await query(`
+        // ПРОБУЕМ ПРОСТОЙ INSERT БЕЗ RETURNING
+        await query(`
           INSERT INTO rounds (gameid, roundnumber, status) 
-          VALUES ($1, $2, 'collecting_words') 
-          RETURNING roundid
+          VALUES ($1, $2, 'collecting_words')
         `, [roomId, room.currentround]);
-        roundId = newRound.rows[0].roundid;
+        
+        // Теперь получаем созданный раунд
+        roundResult = await query(`SELECT * FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, room.currentround]);
+        
+        if (roundResult.rows.length === 0) {
+          console.log('❌ Раунд все еще не найден после создания');
+          return res.status(500).json({ error: 'Не удалось создать раунд' });
+        }
+        
+        roundId = roundResult.rows[0].roundid;
         console.log('✅ Создан новый раунд:', roundId);
       } catch (error) {
         console.error('❌ Ошибка создания раунда:', error);
-        // Пробуем получить раунд еще раз на случай race condition
+        
+        // Пробуем получить раунд еще раз (возможно кто-то другой уже создал)
         roundResult = await query(`SELECT * FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, room.currentround]);
         if (roundResult.rows.length === 0) {
-          return res.status(500).json({ error: 'Не удалось создать раунд' });
+          console.log('❌ Раунд не создан из-за ошибки:', error.message);
+          return res.status(500).json({ error: 'Не удалось создать раунд: ' + error.message });
         }
         roundId = roundResult.rows[0].roundid;
+        console.log('✅ Раунд найден после ошибки:', roundId);
       }
     } else {
       roundId = roundResult.rows[0].roundid;
