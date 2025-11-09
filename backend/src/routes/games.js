@@ -332,7 +332,7 @@ router.post('/:roomId/ready', authenticateToken, async (req, res) => {
   }
 });
 
-// Начало игры
+// ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ НАЧАЛА ИГРЫ
 router.post('/:roomId/start', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -375,11 +375,22 @@ router.post('/:roomId/start', authenticateToken, async (req, res) => {
       WHERE gameid = $1
     `, [roomId]);
 
-    // Создаем первый раунд
-    await query(`
-      INSERT INTO rounds (gameid, roundnumber, status)
-      VALUES ($1, 1, 'collecting_words')
-    `, [roomId]);
+    // Создаем первый раунд с проверкой
+    try {
+      const roundCheck = await query(`SELECT * FROM rounds WHERE gameid = $1 AND roundnumber = 1`, [roomId]);
+      if (roundCheck.rows.length === 0) {
+        const newRound = await query(`
+          INSERT INTO rounds (gameid, roundnumber, status)
+          VALUES ($1, 1, 'collecting_words')
+          RETURNING roundid
+        `, [roomId]);
+        console.log('✅ Первый раунд создан, ID:', newRound.rows[0].roundid);
+      } else {
+        console.log('✅ Первый раунд уже существует, ID:', roundCheck.rows[0].roundid);
+      }
+    } catch (error) {
+      console.error('❌ Ошибка создания раунда:', error);
+    }
 
     console.log('✅ Game started successfully');
     res.json({ success: true, message: 'Игра началась' });
@@ -389,7 +400,7 @@ router.post('/:roomId/start', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ПРОСТОЙ ЭНДПОИНТ ОТПРАВКИ СЛОВА
+// ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ ОТПРАВКИ СЛОВА
 router.post('/:roomId/word', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -410,29 +421,47 @@ router.post('/:roomId/word', authenticateToken, async (req, res) => {
 
     const room = roomResult.rows[0];
     
-    // Получаем или создаем раунд
+    console.log('🔍 Поиск раунда для комнаты:', roomId, 'раунд:', room.currentround);
+
+    // Получаем или создаем раунд - УПРОЩЕННАЯ ВЕРСИЯ
     let roundResult = await query(`SELECT * FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, room.currentround]);
     let roundId;
 
     if (roundResult.rows.length === 0) {
+      console.log('🔄 Раунд не найден, создаем новый...');
       // Создаем раунд
-      const newRound = await query(`
-        INSERT INTO rounds (gameid, roundnumber, status) 
-        VALUES ($1, $2, 'collecting_words') 
-        RETURNING roundid
-      `, [roomId, room.currentround]);
-      roundId = newRound.rows[0].roundid;
-      console.log('✅ Создан новый раунд:', roundId);
+      try {
+        const newRound = await query(`
+          INSERT INTO rounds (gameid, roundnumber, status) 
+          VALUES ($1, $2, 'collecting_words') 
+          RETURNING roundid
+        `, [roomId, room.currentround]);
+        roundId = newRound.rows[0].roundid;
+        console.log('✅ Создан новый раунд:', roundId);
+      } catch (error) {
+        console.error('❌ Ошибка создания раунда:', error);
+        // Пробуем получить раунд еще раз на случай race condition
+        roundResult = await query(`SELECT * FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, room.currentround]);
+        if (roundResult.rows.length === 0) {
+          return res.status(500).json({ error: 'Не удалось создать раунд' });
+        }
+        roundId = roundResult.rows[0].roundid;
+      }
     } else {
       roundId = roundResult.rows[0].roundid;
+      console.log('✅ Найден существующий раунд:', roundId);
+    }
+
+    // Проверяем, не отправил ли уже пользователь слово
+    const existingPhrase = await query(`SELECT * FROM round_phrases WHERE roundid = $1 AND userid = $2`, [roundId, userId]);
+    if (existingPhrase.rows.length > 0) {
+      return res.status(400).json({ error: 'Вы уже отправили слово в этом раунде' });
     }
 
     // Сохраняем слово
     await query(`
       INSERT INTO round_phrases (roundid, userid, phrase) 
       VALUES ($1, $2, $3)
-      ON CONFLICT (roundid, userid) 
-      DO UPDATE SET phrase = $3
     `, [roundId, userId, word]);
 
     console.log('✅ Слово сохранено!');
@@ -821,6 +850,45 @@ router.post('/:roomId/force-guessing', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('❌ Ошибка перехода:', error);
     res.status(500).json({ error: 'Ошибка перехода: ' + error.message });
+  }
+});
+
+// ✅ ДОБАВЛЕНО: Отладочный эндпоинт для проверки раундов
+router.get('/:roomId/debug-rounds', authenticateToken, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    console.log('🔧 DEBUG - проверка раундов для комнаты:', roomId);
+
+    // Получаем комнату
+    const roomResult = await query(`SELECT * FROM games WHERE gameid = $1`, [roomId]);
+    if (roomResult.rows.length === 0) {
+      return res.json({ error: 'Комната не найдена' });
+    }
+
+    const room = roomResult.rows[0];
+
+    // Получаем все раунды комнаты
+    const roundsResult = await query(`SELECT * FROM rounds WHERE gameid = $1 ORDER BY roundnumber`, [roomId]);
+
+    // Получаем игроков
+    const playersResult = await query(`SELECT COUNT(*) as count FROM game_players WHERE gameid = $1`, [roomId]);
+
+    res.json({
+      room: {
+        id: room.gameid,
+        status: room.status,
+        currentRound: room.currentround,
+        totalRounds: room.totalrounds
+      },
+      rounds: roundsResult.rows,
+      totalPlayers: playersResult.rows[0].count,
+      message: `Найдено раундов: ${roundsResult.rows.length}`
+    });
+
+  } catch (error) {
+    console.error('❌ DEBUG ошибка:', error);
+    res.status(500).json({ error: 'DEBUG ошибка: ' + error.message });
   }
 });
 
