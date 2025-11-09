@@ -18,6 +18,9 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
   const [players, setPlayers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [gameStatus, setGameStatus] = useState("");
+  const [isHost, setIsHost] = useState(false);
+  const [allWordsSubmitted, setAllWordsSubmitted] = useState(false);
   
   const timerRef = useRef(null);
   const isMountedRef = useRef(true);
@@ -31,119 +34,101 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
 
   const brushSizes = [2, 5, 10, 15, 20];
 
-  // ✅ ПРОВЕРЕННЫЙ МЕТОД ПОЛУЧЕНИЯ СЛОВА - через цепочку
-  const fetchDrawingWord = useCallback(async () => {
-    if (!roomCode) {
-      console.error('❌ roomCode не указан');
-      return;
-    }
+  // ✅ ЗАПУСК ЭТАПА РИСОВАНИЯ (для хоста)
+  const startDrawingPhase = useCallback(async () => {
+    if (!roomCode) return;
 
     try {
-      console.log('🔄 Получаем слово для рисования... roomId:', roomCode);
+      console.log('🚀 Хост запускает этап рисования...');
       const token = localStorage.getItem('token');
-      
-      // ✅ Пробуем получить слово через round_chain
-      const response = await fetch(`/api/game/${roomCode}/debug-chain`, {
+      const response = await fetch(`/api/game/${roomCode}/start-drawing`, {
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
 
-      console.log('📡 Ответ от сервера (debug-chain):', response.status);
+      if (response.ok) {
+        console.log('✅ Этап рисования запущен!');
+        // Перезагружаем данные
+        loadGameData();
+        fetchDrawingWord();
+      } else {
+        const errorData = await response.json();
+        console.error('❌ Ошибка запуска рисования:', errorData);
+        setError(errorData.error || "Не удалось запустить рисование");
+      }
+    } catch (error) {
+      console.error('❌ Ошибка:', error);
+      setError("Ошибка соединения с сервером");
+    }
+  }, [roomCode]);
+
+  // ✅ ПРОВЕРКА СТАТУСА СЛОВ
+  const checkWordsStatus = useCallback(async () => {
+    if (!roomCode) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/game/${roomCode}/words-status`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
       if (response.ok) {
         const data = await response.json();
-        console.log('📝 Данные цепочки:', data);
+        console.log('📊 Статус слов:', data);
         
-        // Ищем слово для текущего пользователя
-        const userChain = data.chain?.find(item => 
-          item.userid === user?.userId && item.actiontype === 'drawing'
-        );
-        
-        if (userChain && userChain.word) {
-          console.log('✅ Найдено слово для рисования:', userChain.word);
-          setCurrentWord(userChain.word);
-          setError("");
+        if (data.allSubmitted) {
+          setAllWordsSubmitted(true);
+          setError("Все слова отправлены! Хост может запустить рисование.");
         } else {
-          console.log('❌ Слово не найдено в цепочке, пробуем другой метод...');
-          
-          // ✅ Альтернативный метод - получаем первое доступное слово
-          if (data.chain && data.chain.length > 0) {
-            const firstWord = data.chain.find(item => item.actiontype === 'drawing');
-            if (firstWord) {
-              console.log('✅ Используем первое доступное слово:', firstWord.word);
-              setCurrentWord(firstWord.word);
-              setError("");
-            } else {
-              setError("Слово для рисования еще не распределено");
-            }
-          } else {
-            setError("Цепочка слов не создана. Дождитесь начала раунда.");
-          }
+          setAllWordsSubmitted(false);
+          setError(`Ожидаем слова: ${data.submittedCount}/${data.totalPlayers} игроков`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Ошибка проверки статуса:', error);
+    }
+  }, [roomCode]);
+
+  // ✅ ПОЛУЧЕНИЕ СЛОВА ДЛЯ РИСОВАНИЯ
+  const fetchDrawingWord = useCallback(async () => {
+    if (!roomCode) return;
+
+    try {
+      console.log('🔄 Получаем слово для рисования...');
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/game/${roomCode}/my-drawing-word`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📝 Ответ слова:', data);
+        
+        if (data.success && data.word) {
+          console.log('✅ Получено слово для рисования:', data.word);
+          setCurrentWord(data.word);
+          setError("");
+          setIsLoading(false);
+        } else {
+          console.log('ℹ️ Слово еще не доступно:', data.error);
+          setError("Слово для рисования еще не готово. Ожидаем запуска этапа.");
+          setIsLoading(false);
         }
       } else {
-        console.error('❌ Ошибка получения цепочки');
-        setError("Не удалось получить данные игры");
+        console.log('ℹ️ Слово не доступно (статус:', response.status, ')');
+        setError("Ожидаем запуска этапа рисования...");
+        setIsLoading(false);
       }
     } catch (error) {
       console.error('❌ Ошибка получения слова:', error);
       setError("Ошибка соединения с сервером");
-    }
-  }, [roomCode, user]);
-
-  // ✅ ПРАВИЛЬНАЯ ОТПРАВКА РИСУНКА
-  const saveDrawing = useCallback(async (drawingData) => {
-    if (!roomCode) return false;
-
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/save-drawing`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          drawingData: drawingData
-        })
-      });
-
-      if (response.ok) {
-        console.log('✅ Рисунок сохранен на сервере');
-        return true;
-      } else {
-        console.error('❌ Ошибка сохранения рисунка');
-        return false;
-      }
-    } catch (error) {
-      console.error('❌ Ошибка:', error);
-      return false;
-    }
-  }, [roomCode]);
-
-  // ✅ ПРАВИЛЬНОЕ ЗАВЕРШЕНИЕ РИСОВАНИЯ
-  const finishDrawing = useCallback(async () => {
-    if (!roomCode) return false;
-
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/finish-drawing`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.ok) {
-        console.log('✅ Рисование завершено на сервере');
-        return true;
-      } else {
-        console.error('❌ Ошибка завершения рисования');
-        return false;
-      }
-    } catch (error) {
-      console.error('❌ Ошибка:', error);
-      return false;
+      setIsLoading(false);
     }
   }, [roomCode]);
 
@@ -168,8 +153,19 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
           setPlayers(data.players || []);
           if (data.room?.currentround) setCurrentRound(data.room.currentround);
           if (data.room?.totalrounds) setTotalRounds(data.room.totalrounds);
+          if (data.room?.status) setGameStatus(data.room.status);
           
-          setIsLoading(false);
+          // Проверяем, является ли пользователь хостом
+          const currentPlayer = data.players?.find(p => p.userid === user?.userId);
+          setIsHost(currentPlayer?.ishost || false);
+          
+          // Если игра в стадии рисования, пытаемся получить слово
+          if (data.room?.status === 'playing') {
+            fetchDrawingWord();
+          } else {
+            setIsLoading(false);
+            checkWordsStatus();
+          }
         }
       } else {
         console.error('❌ Ошибка загрузки данных игры');
@@ -179,6 +175,41 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
       console.error('❌ Ошибка загрузки данных игры:', error);
       setIsLoading(false);
     }
+  }, [roomCode, user, fetchDrawingWord, checkWordsStatus]);
+
+  // Остальные функции без изменений...
+  const saveDrawing = useCallback(async (drawingData) => {
+    if (!roomCode) return false;
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/game/${roomCode}/save-drawing`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ drawingData })
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('❌ Ошибка:', error);
+      return false;
+    }
+  }, [roomCode]);
+
+  const finishDrawing = useCallback(async () => {
+    if (!roomCode) return false;
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/game/${roomCode}/finish-drawing`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('❌ Ошибка:', error);
+      return false;
+    }
   }, [roomCode]);
 
   useEffect(() => {
@@ -186,48 +217,29 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
     isMountedRef.current = true;
     
     if (roomCode) {
-      // Загружаем данные и слово
-      const initializeGame = async () => {
-        await loadGameData();
-        await fetchDrawingWord();
-      };
-      
-      initializeGame();
+      loadGameData();
 
-      // Таймер для авто-завершения
-      const timer = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            handleTimeUp();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+      // Обновляем данные каждые 3 секунды
+      const interval = setInterval(loadGameData, 3000);
 
       return () => {
         console.log('🎨 DrawingPage unmounted');
         isMountedRef.current = false;
-        clearInterval(timer);
+        clearInterval(interval);
+        if (timerRef.current) clearTimeout(timerRef.current);
       };
     } else {
-      console.error('❌ roomCode не передан в компонент');
+      setError("Не указан код комнаты");
       setIsLoading(false);
     }
-  }, [roomCode, loadGameData, fetchDrawingWord]);
+  }, [roomCode, loadGameData]);
 
   const handleTimeUp = useCallback(async () => {
     console.log('🎨 Время вышло, завершаем рисование...');
-    
     const canvas = canvasRef.current;
-    if (!canvas) {
-      console.error('❌ Canvas не найден');
-      return;
-    }
+    if (!canvas) return;
     
     const drawingData = canvas.toDataURL();
-    
-    // Сохраняем рисунок и завершаем этап
     const saved = await saveDrawing(drawingData);
     if (saved) {
       const finished = await finishDrawing();
@@ -248,12 +260,13 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      console.log('✅ Canvas инициализирован');
     }
   }, []);
 
   // Функции рисования (без изменений)
   const startDrawing = (e) => {
+    if (!currentWord) return; // Не позволяем рисовать без слова
+    
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     const rect = canvas.getBoundingClientRect();
@@ -272,7 +285,7 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
   };
 
   const draw = (e) => {
-    if (!isDrawing) return;
+    if (!isDrawing || !currentWord) return;
     
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -320,58 +333,80 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
     setIsLoading(true);
     setError("");
     loadGameData();
-    fetchDrawingWord();
   };
 
-  // Состояния загрузки/ошибки
+  // ✅ РЕНДЕРИМ РАЗНЫЕ СОСТОЯНИЯ
+
   if (isLoading) {
     return (
       <div className="drawing-container loading">
         <div className="loading-spinner">🎨</div>
         <div className="loading-text">Загрузка игры...</div>
         <div className="loading-details">
-          Комната: {roomCode}<br/>
-          Получаем слово для рисования...
+          Комната: {roomCode}
         </div>
       </div>
     );
   }
 
-  if (error) {
+  // ✅ СОСТОЯНИЕ: ХОСТ МОЖЕТ ЗАПУСТИТЬ РИСОВАНИЕ
+  if (isHost && allWordsSubmitted && !currentWord) {
+    return (
+      <div className="drawing-container waiting-host">
+        <div className="waiting-icon">🚀</div>
+        <div className="waiting-title">Все слова отправлены!</div>
+        <div className="waiting-text">
+          Все игроки отправили свои слова. Вы можете запустить этап рисования.
+        </div>
+        <button className="start-drawing-btn" onClick={startDrawingPhase}>
+          🎨 Запустить рисование
+        </button>
+        <div className="waiting-details">
+          Игроков: {players.length}<br/>
+          Слов отправлено: Все
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ СОСТОЯНИЕ: ОЖИДАНИЕ ЗАПУСКА РИСОВАНИЯ
+  if (!currentWord) {
+    return (
+      <div className="drawing-container waiting">
+        <div className="waiting-icon">⏳</div>
+        <div className="waiting-title">Ожидаем запуска рисования</div>
+        <div className="waiting-text">
+          {isHost 
+            ? "Ожидаем, когда все игроки отправят слова, чтобы запустить рисование."
+            : "Хост скоро запустит этап рисования. Ожидайте..."
+          }
+        </div>
+        {isHost && (
+          <button className="check-status-btn" onClick={checkWordsStatus}>
+            🔄 Проверить статус
+          </button>
+        )}
+        <div className="waiting-details">
+          Статус: {gameStatus}<br/>
+          {error && <div className="waiting-error">{error}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !currentWord) {
     return (
       <div className="drawing-container error">
         <div className="error-icon">❌</div>
         <div className="error-text">{error}</div>
-        <div className="error-details">
-          Room ID: {roomCode}<br/>
-          Проверьте, что хост запустил этап рисования.
-        </div>
         <button className="retry-btn" onClick={retryLoad}>
-          Попробовать снова
-        </button>
-        <button className="back-btn" onClick={() => navigate('/')}>
-          Вернуться на главную
+          Обновить
         </button>
       </div>
     );
   }
 
-  if (!currentWord) {
-    return (
-      <div className="drawing-container error">
-        <div className="error-icon">🎨</div>
-        <div className="error-text">Ожидание распределения слов</div>
-        <div className="error-details">
-          Хост должен запустить этап рисования.<br/>
-          Room ID: {roomCode}
-        </div>
-        <button className="retry-btn" onClick={retryLoad}>
-          Проверить снова
-        </button>
-      </div>
-    );
-  }
-
+  // ✅ СОСТОЯНИЕ: РИСОВАНИЕ АКТИВНО
   console.log('✅ Рендерим интерфейс рисования, слово:', currentWord);
 
   return (
@@ -382,7 +417,10 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
         </button>
         <div className="drawing-title">
           <h1>🎨 Время рисовать!</h1>
-          <div className="room-info">Комната: {roomCode} | Раунд: {currentRound}/{totalRounds}</div>
+          <div className="room-info">
+            Комната: {roomCode} | Раунд: {currentRound}/{totalRounds}
+            {isHost && <span className="host-badge">👑 Хост</span>}
+          </div>
         </div>
         <div className="timer-section">
           <div className={`timer ${timeLeft <= 10 ? 'urgent' : ''}`}>
