@@ -17,92 +17,129 @@ function RoomPage() {
   const isLoadingRef = useRef(false);
   const mountedRef = useRef(true);
 
-  // Загрузка данных комнаты и игроков
-const loadRoomData = useCallback(async () => {
-  // ✅ ДОБАВЬ ЭТУ ПРОВЕРКУ В НАЧАЛЕ:
-  if (!roomId || roomId === 'undefined' || roomId === 'null' || roomId === '') {
-    console.error('❌ Invalid roomId in RoomPage:', roomId);
-    if (mountedRef.current) {
-      setError('Некорректный ID комнаты');
-      setLoading(false);
-    }
-    return;
-  }
-
-  if (isLoadingRef.current || !mountedRef.current) return;
-  
-  isLoadingRef.current = true;
-  try {
-    const token = localStorage.getItem('token');
-    console.log('🔄 Загружаем данные комнаты:', roomId);
+  // ✅ ДОБАВЛЕНО: Функция автоматического присоединения к комнате
+  const joinRoomAutomatically = useCallback(async () => {
+    if (!roomId || !user) return;
     
-    const response = await fetch(`/api/game/${roomId}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Ошибка ${response.status}: ${errorText}`);
-    }
-
-    const data = await response.json();
-    console.log('✅ Данные комнаты:', data);
-    
-    if (!data.room) {
-      throw new Error('Некорректный формат данных комнаты');
-    }
-    
-    if (mountedRef.current) {
-      setRoomInfo(data.room);
-      setPlayers(data.players || []);
-      setError('');
-    }
-    
-  } catch (error) {
-    console.error('❌ Ошибка загрузки комнаты:', error);
-    
-    if (mountedRef.current) {
-      setError(`Не удалось загрузить данные комнаты: ${error.message}`);
+    try {
+      const token = localStorage.getItem('token');
+      console.log('🎯 Автоматическое присоединение к комнате:', roomId);
       
-      // Используем мок-данные только если комната не найдена (404)
-      if (error.message.includes('404') || error.message.includes('не найдена')) {
-        console.log('🎮 Используем тестовые данные');
-        const mockRoomData = {
-          room: {
-            gameid: roomId,
-            title: `Комната ${roomId}`,
-            gamemode: 'classic',
-            status: 'waiting',
-            maxplayers: 8,
-            currentplayers: 1,
-            currentround: 1,
-            totalrounds: 3,
-            createdat: new Date().toISOString()
-          },
-          players: [
-            {
-              userid: user?.userid || 1,
-              login: user?.login || 'Тестовый игрок',
-              ishost: true,
-              ready: false,
-              score: 0
-            }
-          ]
-        };
-        setRoomInfo(mockRoomData.room);
-        setPlayers(mockRoomData.players);
+      const response = await fetch(`/api/game/${roomId}/join`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({})
+      });
+
+      if (response.ok) {
+        console.log('✅ Успешно присоединились к комнате');
+        // Перезагружаем данные комнаты после присоединения
+        setTimeout(loadRoomData, 500);
+      } else {
+        const errorData = await response.json();
+        console.error('❌ Ошибка присоединения:', errorData);
+      }
+    } catch (error) {
+      console.error('❌ Ошибка автоматического присоединения:', error);
+    }
+  }, [roomId, user, loadRoomData]);
+
+  // Загрузка данных комнаты и игроков
+  const loadRoomData = useCallback(async () => {
+    // ✅ ДОБАВЬ ЭТУ ПРОВЕРКУ В НАЧАЛЕ:
+    if (!roomId || roomId === 'undefined' || roomId === 'null' || roomId === '') {
+      console.error('❌ Invalid roomId in RoomPage:', roomId);
+      if (mountedRef.current) {
+        setError('Некорректный ID комнаты');
+        setLoading(false);
+      }
+      return;
+    }
+
+    if (isLoadingRef.current || !mountedRef.current) return;
+    
+    isLoadingRef.current = true;
+    try {
+      const token = localStorage.getItem('token');
+      console.log('🔄 Загружаем данные комнаты:', roomId);
+      
+      const response = await fetch(`/api/game/${roomId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Ошибка ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ Данные комнаты:', data);
+      
+      if (!data.room) {
+        throw new Error('Некорректный формат данных комнаты');
+      }
+      
+      // ✅ ДОБАВЛЕНО: Автоматическое присоединение если пользователь не в комнате
+      const currentPlayer = data.players?.find(p => p.userid === user?.userid);
+      if (!currentPlayer && data.room.status === 'waiting' && user) {
+        console.log('🔄 Пользователь не в комнате, присоединяем...');
+        setTimeout(joinRoomAutomatically, 1000);
+      }
+      
+      if (mountedRef.current) {
+        setRoomInfo(data.room);
+        setPlayers(data.players || []);
         setError('');
       }
+      
+    } catch (error) {
+      console.error('❌ Ошибка загрузки комнаты:', error);
+      
+      if (mountedRef.current) {
+        setError(`Не удалось загрузить данные комнаты: ${error.message}`);
+        
+        // Используем мок-данные только если комната не найдена (404)
+        if (error.message.includes('404') || error.message.includes('не найдена')) {
+          console.log('🎮 Используем тестовые данные');
+          const mockRoomData = {
+            room: {
+              gameid: roomId,
+              title: `Комната ${roomId}`,
+              gamemode: 'classic',
+              status: 'waiting',
+              maxplayers: 8,
+              currentplayers: 1,
+              currentround: 1,
+              totalrounds: 3,
+              createdat: new Date().toISOString()
+            },
+            players: [
+              {
+                userid: user?.userid || 1,
+                login: user?.login || 'Тестовый игрок',
+                ishost: true,
+                ready: false,
+                score: 0
+              }
+            ]
+          };
+          setRoomInfo(mockRoomData.room);
+          setPlayers(mockRoomData.players);
+          setError('');
+        }
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+      isLoadingRef.current = false;
     }
-  } finally {
-    if (mountedRef.current) {
-      setLoading(false);
-    }
-    isLoadingRef.current = false;
-  }
-}, [roomId, user]);
+  }, [roomId, user, joinRoomAutomatically]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -113,6 +150,17 @@ const loadRoomData = useCallback(async () => {
     // Интервал для обновления каждые 2 секунды
     const interval = setInterval(loadRoomData, 2000);
     
+    // ✅ ДОБАВЛЕНО: Автоматическое присоединение через 2 секунды
+    const autoJoinTimeout = setTimeout(() => {
+      if (roomInfo?.status === 'waiting' && user) {
+        const isPlayerInRoom = players.some(p => p.userid === user.userid);
+        if (!isPlayerInRoom) {
+          console.log('⏰ Автоматическое присоединение по таймауту');
+          joinRoomAutomatically();
+        }
+      }
+    }, 2000);
+
     // WebSocket для реального времени (если поддерживается бэкендом)
     let ws = null;
     try {
@@ -153,11 +201,12 @@ const loadRoomData = useCallback(async () => {
     return () => {
       mountedRef.current = false;
       clearInterval(interval);
+      clearTimeout(autoJoinTimeout); // ✅ ОЧИСТКА ТАЙМЕРА
       if (ws) {
         ws.close();
       }
     };
-  }, [loadRoomData, roomId]);
+  }, [loadRoomData, roomId, roomInfo, players, user, joinRoomAutomatically]);
 
   // Функция для запуска отсчета
   const startCountdown = useCallback(() => {
