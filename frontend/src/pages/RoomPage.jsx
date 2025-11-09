@@ -16,7 +16,8 @@ function RoomPage() {
 
   const isLoadingRef = useRef(false);
   const mountedRef = useRef(true);
-  const hasJoinedRef = useRef(false); // ✅ Следим за тем присоединились ли мы
+  const hasJoinedRef = useRef(false);
+  const hasRedirectedRef = useRef(false); // ✅ Защита от повторного перехода
 
   const loadRoomData = useCallback(async () => {
     if (!roomId || roomId === 'undefined' || roomId === 'null' || roomId === '') {
@@ -51,6 +52,16 @@ function RoomPage() {
       
       if (!data.room) {
         throw new Error('Некорректный формат данных комнаты');
+      }
+      
+      // ✅ ДОБАВЛЕНО: АВТОМАТИЧЕСКИЙ ПЕРЕХОД ЕСЛИ ИГРА НАЧАЛАСЬ
+      if (data.room.status === 'playing' && mountedRef.current && !hasRedirectedRef.current) {
+        console.log('🎮 Игра началась, переходим к созданию слов!');
+        hasRedirectedRef.current = true;
+        setTimeout(() => {
+          navigate(`/room/${roomId}/create-words`);
+        }, 1000);
+        return; // ✅ Не обновляем состояние если переходим
       }
       
       if (mountedRef.current) {
@@ -100,7 +111,7 @@ function RoomPage() {
       }
       isLoadingRef.current = false;
     }
-  }, [roomId, user]);
+  }, [roomId, user, navigate]); // ✅ ДОБАВЛЕН navigate
 
   const joinRoomAutomatically = useCallback(async () => {
     if (!roomId || !user || hasJoinedRef.current) return;
@@ -120,8 +131,7 @@ function RoomPage() {
 
       if (response.ok) {
         console.log('✅ Успешно присоединились к комнате');
-        hasJoinedRef.current = true; // ✅ Помечаем что присоединились
-        // Перезагружаем данные комнаты после присоединения
+        hasJoinedRef.current = true;
         setTimeout(loadRoomData, 500);
       } else {
         const errorData = await response.json();
@@ -134,15 +144,13 @@ function RoomPage() {
 
   useEffect(() => {
     mountedRef.current = true;
-    hasJoinedRef.current = false; // ✅ Сбрасываем при монтировании
+    hasJoinedRef.current = false;
+    hasRedirectedRef.current = false; // ✅ Сбрасываем при монтировании
     
-    // Первоначальная загрузка
     loadRoomData();
     
-    // ✅ УВЕЛИЧИВАЕМ ЧАСТОТУ ОБНОВЛЕНИЯ - КАЖДУЮ СЕКУНДУ
     const interval = setInterval(loadRoomData, 1000);
     
-    // ✅ УЛУЧШАЕМ АВТОМАТИЧЕСКОЕ ПРИСОЕДИНЕНИЕ
     const autoJoinTimeout = setTimeout(() => {
       if (user && roomId) {
         const isPlayerInRoom = players.some(p => p.userid === user.userid);
@@ -153,7 +161,6 @@ function RoomPage() {
       }
     }, 2000);
 
-    // ✅ ДОБАВЛЯЕМ РЕЗЕРВНОЕ ПРИСОЕДИНЕНИЕ
     const backupJoinTimeout = setTimeout(() => {
       if (user && roomId && !hasJoinedRef.current) {
         console.log('🔄 Резервное присоединение к комнате');
@@ -161,54 +168,24 @@ function RoomPage() {
       }
     }, 5000);
 
-    // ✅ ОТКЛЮЧАЕМ WEBSOCKET ИЗ-ЗА ОШИБОК
-    // WebSocket вызывает ошибки, поэтому временно отключаем
-    /*
-    let ws = null;
-    try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/game/${roomId}`;
-      ws = new WebSocket(wsUrl);
-      
-      ws.onopen = () => {
-        console.log('WebSocket подключен');
-      };
-      
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        console.log('WebSocket сообщение:', data);
-        
-        if (data.type === 'PLAYER_JOINED' || data.type === 'PLAYER_LEFT' || data.type === 'PLAYER_READY') {
-          loadRoomData();
-        }
-        
-        if (data.type === 'GAME_STARTED') {
-          startCountdown();
-        }
-      };
-      
-      ws.onerror = (error) => {
-        console.error('WebSocket ошибка:', error);
-      };
-      
-      ws.onclose = () => {
-        console.log('WebSocket отключен');
-      };
-    } catch (error) {
-      console.log('WebSocket не поддерживается, используем polling');
-    }
-    */
+    // ✅ ДОБАВЛЕНО: ОТДЕЛЬНЫЙ ИНТЕРВАЛ ДЛЯ ПРОВЕРКИ СТАТУСА ИГРЫ
+    const gameStatusInterval = setInterval(() => {
+      if (roomInfo?.status === 'playing' && !hasRedirectedRef.current && mountedRef.current) {
+        console.log('🎯 Обнаружено начало игры, переходим!');
+        hasRedirectedRef.current = true;
+        clearInterval(gameStatusInterval);
+        navigate(`/room/${roomId}/create-words`);
+      }
+    }, 500);
 
     return () => {
       mountedRef.current = false;
       clearInterval(interval);
+      clearInterval(gameStatusInterval); // ✅ Очищаем интервал статуса
       clearTimeout(autoJoinTimeout);
       clearTimeout(backupJoinTimeout);
-      // if (ws) {
-      //   ws.close();
-      // }
     };
-  }, [loadRoomData, roomId, roomInfo, players, user, joinRoomAutomatically]);
+  }, [loadRoomData, roomId, roomInfo, players, user, joinRoomAutomatically, navigate]);
 
   // Функция для запуска отсчета
   const startCountdown = useCallback(() => {
@@ -221,6 +198,7 @@ function RoomPage() {
           clearInterval(countdownInterval);
           setTimeout(() => {
             setShowCountdown(false);
+            console.log('🎮 Хост переходит к созданию слов');
             navigate(`/room/${roomId}/create-words`);
           }, 1000);
           return 0;
@@ -314,7 +292,6 @@ function RoomPage() {
     navigate('/choose-mode');
   };
 
-  // ✅ ДОБАВЛЯЕМ ФУНКЦИЮ ДЛЯ РУЧНОГО ПРИСОЕДИНЕНИЯ
   const handleManualJoin = async () => {
     await joinRoomAutomatically();
   };
@@ -443,7 +420,6 @@ function RoomPage() {
               </div>
             </div>
 
-            {/* ✅ ДОБАВЛЯЕМ КНОПКУ РУЧНОГО ПРИСОЕДИНЕНИЯ */}
             {!currentPlayer && roomInfo.status === 'waiting' && (
               <div className="join-manual-section">
                 <button 
@@ -517,7 +493,7 @@ function RoomPage() {
 
             {roomInfo.status === 'playing' && (
               <div className="game-started-message">
-                🎮 Игра уже началась! Ожидайте следующего раунда...
+                🎮 Игра уже началась! Скоро произойдет автоматический переход...
               </div>
             )}
 
