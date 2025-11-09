@@ -389,134 +389,102 @@ router.post('/:roomId/start', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ИСПРАВЛЕНО: Отправка слова
+// ✅ ПРОСТОЙ ЭНДПОИНТ ОТПРАВКИ СЛОВА
 router.post('/:roomId/word', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     const { word } = req.body;
     const userId = req.user.userId;
     
-    console.log('📝 Получено слово для комнаты:', roomId, 'от пользователя:', userId, 'слово:', word);
+    console.log('📝 СЛОВО - room:', roomId, 'user:', userId, 'word:', word);
 
-    // Проверяем существование комнаты и получаем текущий раунд
-    const roomResult = await query(`
-      SELECT * FROM games WHERE gameid = $1 AND status = 'playing'
-    `, [roomId]);
+    if (!word) {
+      return res.status(400).json({ error: 'Слово обязательно' });
+    }
 
+    // Получаем комнату
+    const roomResult = await query(`SELECT * FROM games WHERE gameid = $1`, [roomId]);
     if (roomResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Комната не найдена или игра не начата' });
+      return res.status(404).json({ error: 'Комната не найдена' });
     }
 
     const room = roomResult.rows[0];
-    const currentRound = room.currentround;
-
-    // Проверяем что пользователь в комнате
-    const playerResult = await query(`
-      SELECT * FROM game_players WHERE gameid = $1 AND userid = $2
-    `, [roomId, userId]);
-
-    if (playerResult.rows.length === 0) {
-      return res.status(403).json({ error: 'Вы не в этой комнате' });
-    }
-
-    // Получаем roundid для текущего раунда
-    const roundResult = await query(`
-      SELECT roundid FROM rounds 
-      WHERE gameid = $1 AND roundnumber = $2
-    `, [roomId, currentRound]);
+    
+    // Получаем или создаем раунд
+    let roundResult = await query(`SELECT * FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, room.currentround]);
+    let roundId;
 
     if (roundResult.rows.length === 0) {
-      return res.status(400).json({ error: 'Раунд не найден' });
+      // Создаем раунд
+      const newRound = await query(`
+        INSERT INTO rounds (gameid, roundnumber, status) 
+        VALUES ($1, $2, 'collecting_words') 
+        RETURNING roundid
+      `, [roomId, room.currentround]);
+      roundId = newRound.rows[0].roundid;
+      console.log('✅ Создан новый раунд:', roundId);
+    } else {
+      roundId = roundResult.rows[0].roundid;
     }
 
-    const roundId = roundResult.rows[0].roundid;
-
-    // Проверяем, не отправил ли уже пользователь слово в этом раунде
-    const existingPhrase = await query(`
-      SELECT * FROM round_phrases 
-      WHERE roundid = $1 AND userid = $2
-    `, [roundId, userId]);
-
-    if (existingPhrase.rows.length > 0) {
-      return res.status(400).json({ error: 'Вы уже отправили слово в этом раунде' });
-    }
-
-    // ✅ СОХРАНЯЕМ СЛОВО В ТАБЛИЦУ round_phrases
-    const phraseResult = await query(`
-      INSERT INTO round_phrases (roundid, userid, phrase)
+    // Сохраняем слово
+    await query(`
+      INSERT INTO round_phrases (roundid, userid, phrase) 
       VALUES ($1, $2, $3)
-      RETURNING phraseid
+      ON CONFLICT (roundid, userid) 
+      DO UPDATE SET phrase = $3
     `, [roundId, userId, word]);
 
-    console.log('✅ Слово сохранено в round_phrases с ID:', phraseResult.rows[0].phraseid);
-    
+    console.log('✅ Слово сохранено!');
+
     res.json({
       success: true,
-      message: 'Слово успешно отправлено',
-      word: word,
-      roundId: roundId
+      message: 'Слово отправлено!',
+      word: word
     });
 
   } catch (error) {
-    console.error('❌ Ошибка сохранения слова:', error);
-    res.status(500).json({ error: 'Ошибка сохранения слова: ' + error.message });
+    console.error('❌ Ошибка отправки слова:', error);
+    res.status(500).json({ error: 'Ошибка: ' + error.message });
   }
 });
 
-// ✅ ИСПРАВЛЕНО: Получение статуса слов
+// ✅ ПРОСТОЙ ЭНДПОИНТ СТАТУСА СЛОВ
 router.get('/:roomId/words-status', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     
-    console.log('🔄 Получаем статус слов для комнаты:', roomId);
+    console.log('🔄 СТАТУС СЛОВ - room:', roomId);
 
-    // Получаем текущий раунд комнаты
-    const roomResult = await query(`
-      SELECT currentround FROM games WHERE gameid = $1
-    `, [roomId]);
-
+    // Получаем текущий раунд
+    const roomResult = await query(`SELECT currentround FROM games WHERE gameid = $1`, [roomId]);
     if (roomResult.rows.length === 0) {
       return res.status(404).json({ error: 'Комната не найдена' });
     }
 
     const currentRound = roomResult.rows[0].currentround;
 
-    // Получаем roundid для текущего раунда
-    const roundResult = await query(`
-      SELECT roundid FROM rounds 
-      WHERE gameid = $1 AND roundnumber = $2
-    `, [roomId, currentRound]);
+    // Получаем roundid
+    const roundResult = await query(`SELECT roundid FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, currentRound]);
+    let roundId = roundResult.rows.length > 0 ? roundResult.rows[0].roundid : null;
 
-    let roundId = null;
-    if (roundResult.rows.length > 0) {
-      roundId = roundResult.rows[0].roundid;
-    }
-
-    // Получаем всех игроков комнаты
+    // Получаем игроков
     const playersResult = await query(`
-      SELECT 
-        gp.userid,
-        u.login,
-        gp.ready
+      SELECT gp.userid, u.login, gp.ready 
       FROM game_players gp
       LEFT JOIN users u ON gp.userid = u.userid
       WHERE gp.gameid = $1
       ORDER BY gp.playerorder
     `, [roomId]);
 
-    // Получаем отправленные слова для текущего раунда
+    // Получаем отправленные слова
     let submittedWords = [];
     if (roundId) {
-      const wordsResult = await query(`
-        SELECT userid, phrase 
-        FROM round_phrases 
-        WHERE roundid = $1
-      `, [roundId]);
-      
+      const wordsResult = await query(`SELECT userid, phrase FROM round_phrases WHERE roundid = $1`, [roundId]);
       submittedWords = wordsResult.rows;
     }
 
-    // Формируем ответ с информацией о статусе отправки слов
+    // Формируем ответ
     const playersWithStatus = playersResult.rows.map(player => {
       const hasSubmitted = submittedWords.some(word => word.userid === player.userid);
       const userWord = submittedWords.find(word => word.userid === player.userid);
@@ -540,8 +508,7 @@ router.get('/:roomId/words-status', authenticateToken, async (req, res) => {
       submittedCount: submittedCount,
       totalPlayers: totalPlayers,
       allSubmitted: submittedCount === totalPlayers && totalPlayers > 0,
-      currentRound: currentRound,
-      roundId: roundId
+      currentRound: currentRound
     });
 
   } catch (error) {
@@ -550,29 +517,21 @@ router.get('/:roomId/words-status', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ДОБАВЛЕНО: Запуск этапа рисования (когда все слова собраны)
+// ✅ ПРОСТОЙ ЭНДПОИНТ ЗАПУСКА РИСОВАНИЯ
 router.post('/:roomId/start-drawing', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     
-    console.log('🎨 Запуск этапа рисования для комнаты:', roomId);
+    console.log('🎨 ЗАПУСК РИСОВАНИЯ - room:', roomId);
 
     // Проверяем, что пользователь - хост
-    const hostCheck = await query(`
-      SELECT ishost FROM game_players 
-      WHERE gameid = $1 AND userid = $2 AND ishost = true
-    `, [roomId, req.user.userId]);
-
+    const hostCheck = await query(`SELECT ishost FROM game_players WHERE gameid = $1 AND userid = $2 AND ishost = true`, [roomId, req.user.userId]);
     if (hostCheck.rows.length === 0) {
-      console.log('❌ User is not host');
       return res.status(403).json({ error: 'Только хост может запустить этап рисования' });
     }
 
     // Получаем текущий раунд
-    const roomResult = await query(`
-      SELECT currentround FROM games WHERE gameid = $1
-    `, [roomId]);
-
+    const roomResult = await query(`SELECT currentround FROM games WHERE gameid = $1`, [roomId]);
     if (roomResult.rows.length === 0) {
       return res.status(404).json({ error: 'Комната не найдена' });
     }
@@ -580,107 +539,65 @@ router.post('/:roomId/start-drawing', authenticateToken, async (req, res) => {
     const currentRound = roomResult.rows[0].currentround;
 
     // Получаем roundid
-    const roundResult = await query(`
-      SELECT roundid FROM rounds 
-      WHERE gameid = $1 AND roundnumber = $2
-    `, [roomId, currentRound]);
-
+    const roundResult = await query(`SELECT roundid FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, currentRound]);
     if (roundResult.rows.length === 0) {
       return res.status(400).json({ error: 'Раунд не найден' });
     }
 
     const roundId = roundResult.rows[0].roundid;
 
-    // Проверяем что все игроки отправили слова
-    const wordsResult = await query(`
-      SELECT COUNT(*) as submitted_count 
-      FROM round_phrases 
-      WHERE roundid = $1
-    `, [roundId]);
+    // Проверяем что все отправили слова
+    const wordsResult = await query(`SELECT COUNT(*) as count FROM round_phrases WHERE roundid = $1`, [roundId]);
+    const playersResult = await query(`SELECT COUNT(*) as count FROM game_players WHERE gameid = $1`, [roomId]);
 
-    const playersResult = await query(`
-      SELECT COUNT(*) as total_players 
-      FROM game_players 
-      WHERE gameid = $1
-    `, [roomId]);
-
-    const submittedCount = wordsResult.rows[0].submitted_count;
-    const totalPlayers = playersResult.rows[0].total_players;
-
-    if (submittedCount < totalPlayers) {
-      return res.status(400).json({ 
-        error: 'Не все игроки отправили слова', 
-        submitted: submittedCount, 
-        total: totalPlayers 
-      });
+    if (wordsResult.rows[0].count < playersResult.rows[0].count) {
+      return res.status(400).json({ error: 'Не все игроки отправили слова' });
     }
 
-    // ✅ СОЗДАЕМ ЦЕПОЧКУ СЛОВ ДЛЯ РИСОВАНИЯ
-    // Получаем всех игроков в порядке их playerorder
-    const allPlayers = await query(`
-      SELECT userid, playerorder 
-      FROM game_players 
-      WHERE gameid = $1 
-      ORDER BY playerorder
-    `, [roomId]);
+    // Создаем цепочку слов
+    const allPlayers = await query(`SELECT userid, playerorder FROM game_players WHERE gameid = $1 ORDER BY playerorder`, [roomId]);
+    const allWords = await query(`SELECT userid, phrase FROM round_phrases WHERE roundid = $1`, [roundId]);
 
-    // Получаем все слова
-    const allWords = await query(`
-      SELECT userid, phrase 
-      FROM round_phrases 
-      WHERE roundid = $1
-    `, [roundId]);
-
-    // Создаем цепочку: каждый игрок получает слово предыдущего игрока
     for (let i = 0; i < allPlayers.rows.length; i++) {
       const currentPlayer = allPlayers.rows[i];
-      const previousPlayerIndex = (i - 1 + allPlayers.rows.length) % allPlayers.rows.length;
-      const previousPlayer = allPlayers.rows[previousPlayerIndex];
+      const prevIndex = (i - 1 + allPlayers.rows.length) % allPlayers.rows.length;
+      const prevPlayer = allPlayers.rows[prevIndex];
+      const prevWord = allWords.rows.find(w => w.userid === prevPlayer.userid);
       
-      // Находим слово предыдущего игрока
-      const previousPlayerWord = allWords.rows.find(w => w.userid === previousPlayer.userid);
-      
-      if (previousPlayerWord) {
-        // Сохраняем в round_chain
+      if (prevWord) {
         await query(`
           INSERT INTO round_chain (roundid, userid, actiontype, actiondata, actionorder)
           VALUES ($1, $2, 'drawing', $3, $4)
-        `, [roundId, currentPlayer.userid, previousPlayerWord.phrase, i + 1]);
+        `, [roundId, currentPlayer.userid, prevWord.phrase, i + 1]);
       }
     }
 
     // Обновляем статус раунда
-    await query(`
-      UPDATE rounds SET status = 'drawing' WHERE roundid = $1
-    `, [roundId]);
+    await query(`UPDATE rounds SET status = 'drawing' WHERE roundid = $1`, [roundId]);
 
-    console.log('✅ Цепочка слов создана, этап рисования начат');
+    console.log('✅ Рисование запущено!');
 
     res.json({
       success: true,
-      message: 'Этап рисования начат',
-      roundId: roundId
+      message: 'Этап рисования начат!'
     });
 
   } catch (error) {
-    console.error('❌ Ошибка запуска этапа рисования:', error);
-    res.status(500).json({ error: 'Ошибка запуска этапа рисования: ' + error.message });
+    console.error('❌ Ошибка запуска рисования:', error);
+    res.status(500).json({ error: 'Ошибка запуска рисования: ' + error.message });
   }
 });
 
-// ✅ ДОБАВЛЕНО: Получение слова для рисования текущим игроком
+// ✅ ПРОСТОЙ ЭНДПОИНТ ПОЛУЧЕНИЯ СЛОВА ДЛЯ РИСОВАНИЯ
 router.get('/:roomId/my-drawing-word', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     const userId = req.user.userId;
     
-    console.log('🔄 Получение слова для рисования пользователем:', userId);
+    console.log('🔄 ПОЛУЧЕНИЕ СЛОВА ДЛЯ РИСОВАНИЯ - user:', userId);
 
     // Получаем текущий раунд
-    const roomResult = await query(`
-      SELECT currentround FROM games WHERE gameid = $1
-    `, [roomId]);
-
+    const roomResult = await query(`SELECT currentround FROM games WHERE gameid = $1`, [roomId]);
     if (roomResult.rows.length === 0) {
       return res.status(404).json({ error: 'Комната не найдена' });
     }
@@ -688,31 +605,22 @@ router.get('/:roomId/my-drawing-word', authenticateToken, async (req, res) => {
     const currentRound = roomResult.rows[0].currentround;
 
     // Получаем roundid
-    const roundResult = await query(`
-      SELECT roundid FROM rounds 
-      WHERE gameid = $1 AND roundnumber = $2
-    `, [roomId, currentRound]);
-
+    const roundResult = await query(`SELECT roundid FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, currentRound]);
     if (roundResult.rows.length === 0) {
       return res.status(400).json({ error: 'Раунд не найден' });
     }
 
     const roundId = roundResult.rows[0].roundid;
 
-    // Получаем слово для рисования из round_chain
-    const drawingWordResult = await query(`
-      SELECT actiondata as word 
-      FROM round_chain 
-      WHERE roundid = $1 AND userid = $2 AND actiontype = 'drawing'
-    `, [roundId, userId]);
+    // Получаем слово для рисования
+    const wordResult = await query(`SELECT actiondata as word FROM round_chain WHERE roundid = $1 AND userid = $2 AND actiontype = 'drawing'`, [roundId, userId]);
 
-    if (drawingWordResult.rows.length === 0) {
+    if (wordResult.rows.length === 0) {
       return res.status(404).json({ error: 'Слово для рисования не найдено' });
     }
 
-    const word = drawingWordResult.rows[0].word;
-
-    console.log('✅ Слово для рисования получено:', word);
+    const word = wordResult.rows[0].word;
+    console.log('✅ Слово для рисования:', word);
     
     res.json({
       success: true,
@@ -720,25 +628,26 @@ router.get('/:roomId/my-drawing-word', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Ошибка получения слова для рисования:', error);
-    res.status(500).json({ error: 'Ошибка получения слова для рисования' });
+    console.error('❌ Ошибка получения слова:', error);
+    res.status(500).json({ error: 'Ошибка получения слова' });
   }
 });
 
-// ✅ ДОБАВЛЕНО: Сохранение рисунка
+// ✅ ПРОСТОЙ ЭНДПОИНТ СОХРАНЕНИЯ РИСУНКА
 router.post('/:roomId/save-drawing', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     const { drawingData } = req.body;
     const userId = req.user.userId;
     
-    console.log('🎨 Сохранение рисунка для комнаты:', roomId, 'пользователь:', userId);
+    console.log('🎨 СОХРАНЕНИЕ РИСУНКА - room:', roomId, 'user:', userId);
+
+    if (!drawingData) {
+      return res.status(400).json({ error: 'Нет данных рисунка' });
+    }
 
     // Получаем текущий раунд
-    const roomResult = await query(`
-      SELECT currentround FROM games WHERE gameid = $1
-    `, [roomId]);
-
+    const roomResult = await query(`SELECT currentround FROM games WHERE gameid = $1`, [roomId]);
     if (roomResult.rows.length === 0) {
       return res.status(404).json({ error: 'Комната не найдена' });
     }
@@ -746,42 +655,26 @@ router.post('/:roomId/save-drawing', authenticateToken, async (req, res) => {
     const currentRound = roomResult.rows[0].currentround;
 
     // Получаем roundid
-    const roundResult = await query(`
-      SELECT roundid FROM rounds 
-      WHERE gameid = $1 AND roundnumber = $2
-    `, [roomId, currentRound]);
-
+    const roundResult = await query(`SELECT roundid FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, currentRound]);
     if (roundResult.rows.length === 0) {
       return res.status(400).json({ error: 'Раунд не найден' });
     }
 
     const roundId = roundResult.rows[0].roundid;
 
-    // Проверяем, не сохранил ли уже пользователь рисунок
-    const existingDrawing = await query(`
-      SELECT * FROM drawings 
-      WHERE roundid = $1 AND userid = $2
-    `, [roundId, userId]);
+    // Сохраняем рисунок
+    await query(`
+      INSERT INTO drawings (roundid, userid, drawingdata) 
+      VALUES ($1, $2, $3)
+      ON CONFLICT (roundid, userid) 
+      DO UPDATE SET drawingdata = $3, createdat = NOW()
+    `, [roundId, userId, drawingData]);
 
-    if (existingDrawing.rows.length > 0) {
-      // Обновляем существующий рисунок
-      await query(`
-        UPDATE drawings SET drawingdata = $3, createdat = NOW() 
-        WHERE roundid = $1 AND userid = $2
-      `, [roundId, userId, drawingData]);
-    } else {
-      // Сохраняем новый рисунок
-      await query(`
-        INSERT INTO drawings (roundid, userid, drawingdata)
-        VALUES ($1, $2, $3)
-      `, [roundId, userId, drawingData]);
-    }
-
-    console.log('✅ Рисунок сохранен');
+    console.log('✅ Рисунок сохранен!');
 
     res.json({
       success: true,
-      message: 'Рисунок сохранен'
+      message: 'Рисунок сохранен!'
     });
 
   } catch (error) {
@@ -790,19 +683,16 @@ router.post('/:roomId/save-drawing', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ДОБАВЛЕНО: Завершение рисунка
+// ✅ ПРОСТОЙ ЭНДПОИНТ ЗАВЕРШЕНИЯ РИСОВАНИЯ
 router.post('/:roomId/finish-drawing', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     const userId = req.user.userId;
     
-    console.log('✅ Завершение рисунка пользователем:', userId, 'в комнате:', roomId);
+    console.log('✅ ЗАВЕРШЕНИЕ РИСОВАНИЯ - user:', userId);
 
     // Получаем текущий раунд
-    const roomResult = await query(`
-      SELECT currentround FROM games WHERE gameid = $1
-    `, [roomId]);
-
+    const roomResult = await query(`SELECT currentround FROM games WHERE gameid = $1`, [roomId]);
     if (roomResult.rows.length === 0) {
       return res.status(404).json({ error: 'Комната не найдена' });
     }
@@ -810,87 +700,42 @@ router.post('/:roomId/finish-drawing', authenticateToken, async (req, res) => {
     const currentRound = roomResult.rows[0].currentround;
 
     // Получаем roundid
-    const roundResult = await query(`
-      SELECT roundid FROM rounds 
-      WHERE gameid = $1 AND roundnumber = $2
-    `, [roomId, currentRound]);
-
+    const roundResult = await query(`SELECT roundid FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, currentRound]);
     if (roundResult.rows.length === 0) {
       return res.status(400).json({ error: 'Раунд не найден' });
     }
 
     const roundId = roundResult.rows[0].roundid;
 
-    // Отмечаем что пользователь завершил рисование в round_chain
+    // Отмечаем завершение
     await query(`
       UPDATE round_chain 
       SET actiontype = 'drawing_completed' 
       WHERE roundid = $1 AND userid = $2 AND actiontype = 'drawing'
     `, [roundId, userId]);
 
-    console.log('✅ Рисование завершено пользователем:', userId);
-
-    // Проверяем, все ли завершили рисование
-    const drawingStatusResult = await query(`
-      SELECT 
-        COUNT(*) as total_artists,
-        COUNT(CASE WHEN actiontype = 'drawing_completed' THEN 1 END) as completed_artists
-      FROM round_chain 
-      WHERE roundid = $1 AND (actiontype = 'drawing' OR actiontype = 'drawing_completed')
-    `, [roundId]);
-
-    const { total_artists, completed_artists } = drawingStatusResult.rows[0];
-
-    console.log(`🎨 Статус рисования: ${completed_artists}/${total_artists}`);
-
-    // Если все завершили рисование, автоматически запускаем этап угадывания
-    if (completed_artists === total_artists && total_artists > 0) {
-      console.log('🚀 Все завершили рисование, запускаем этап угадывания');
-      
-      // Обновляем статус раунда
-      await query(`
-        UPDATE rounds SET status = 'guessing' WHERE roundid = $1
-      `, [roundId]);
-
-      // Создаем записи для угадываний
-      const artistsResult = await query(`
-        SELECT userid FROM round_chain 
-        WHERE roundid = $1 AND actiontype = 'drawing_completed'
-      `, [roundId]);
-
-      for (const artist of artistsResult.rows) {
-        // Каждый художник становится объектом для угадывания
-        await query(`
-          INSERT INTO round_chain (roundid, userid, actiontype, actiondata, actionorder)
-          VALUES ($1, $2, 'guess_target', 'drawing', 10)
-        `, [roundId, artist.userid]);
-      }
-    }
+    console.log('✅ Рисование завершено!');
 
     res.json({
       success: true,
-      message: 'Рисование завершено',
-      allCompleted: completed_artists === total_artists
+      message: 'Рисование завершено!'
     });
 
   } catch (error) {
-    console.error('❌ Ошибка завершения рисунка:', error);
-    res.status(500).json({ error: 'Ошибка завершения рисунка: ' + error.message });
+    console.error('❌ Ошибка завершения рисования:', error);
+    res.status(500).json({ error: 'Ошибка завершения рисования: ' + error.message });
   }
 });
 
-// ✅ ДОБАВЛЕНО: Получение статуса рисования
+// ✅ ПРОСТОЙ ЭНДПОИНТ СТАТУСА РИСОВАНИЯ
 router.get('/:roomId/drawing-status', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     
-    console.log('🔄 Получение статуса рисования для комнаты:', roomId);
+    console.log('🔄 СТАТУС РИСОВАНИЯ - room:', roomId);
 
     // Получаем текущий раунд
-    const roomResult = await query(`
-      SELECT currentround FROM games WHERE gameid = $1
-    `, [roomId]);
-
+    const roomResult = await query(`SELECT currentround FROM games WHERE gameid = $1`, [roomId]);
     if (roomResult.rows.length === 0) {
       return res.status(404).json({ error: 'Комната не найдена' });
     }
@@ -898,11 +743,7 @@ router.get('/:roomId/drawing-status', authenticateToken, async (req, res) => {
     const currentRound = roomResult.rows[0].currentround;
 
     // Получаем roundid
-    const roundResult = await query(`
-      SELECT roundid, status FROM rounds 
-      WHERE gameid = $1 AND roundnumber = $2
-    `, [roomId, currentRound]);
-
+    const roundResult = await query(`SELECT roundid, status FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, currentRound]);
     if (roundResult.rows.length === 0) {
       return res.status(400).json({ error: 'Раунд не найден' });
     }
@@ -910,191 +751,49 @@ router.get('/:roomId/drawing-status', authenticateToken, async (req, res) => {
     const roundId = roundResult.rows[0].roundid;
     const roundStatus = roundResult.rows[0].status;
 
-    // Получаем статус рисования всех игроков
-    const drawingStatusResult = await query(`
-      SELECT 
-        rc.userid,
-        u.login,
-        rc.actiontype as status,
-        rc.actiondata as word,
-        CASE 
-          WHEN d.drawingdata IS NOT NULL THEN true 
-          ELSE false 
-        END as has_drawing
+    // Получаем статус игроков
+    const statusResult = await query(`
+      SELECT rc.userid, u.login, rc.actiontype as status, rc.actiondata as word
       FROM round_chain rc
       LEFT JOIN users u ON rc.userid = u.userid
-      LEFT JOIN drawings d ON rc.roundid = d.roundid AND rc.userid = d.userid
       WHERE rc.roundid = $1 AND (rc.actiontype = 'drawing' OR rc.actiontype = 'drawing_completed')
       ORDER BY rc.actionorder
     `, [roundId]);
 
-    const totalArtists = drawingStatusResult.rows.length;
-    const completedArtists = drawingStatusResult.rows.filter(p => p.status === 'drawing_completed').length;
+    const total = statusResult.rows.length;
+    const completed = statusResult.rows.filter(p => p.status === 'drawing_completed').length;
 
-    console.log('✅ Статус рисования:', completedArtists + '/' + totalArtists);
+    console.log('✅ Статус рисования:', completed + '/' + total);
     
     res.json({
-      players: drawingStatusResult.rows,
-      completedCount: completedArtists,
-      totalCount: totalArtists,
-      allCompleted: completedArtists === totalArtists && totalArtists > 0,
-      roundStatus: roundStatus,
-      currentRound: currentRound
+      players: statusResult.rows,
+      completedCount: completed,
+      totalCount: total,
+      allCompleted: completed === total && total > 0,
+      roundStatus: roundStatus
     });
 
   } catch (error) {
-    console.error('❌ Ошибка получения статуса рисования:', error);
-    res.status(500).json({ error: 'Ошибка получения статуса рисования' });
+    console.error('❌ Ошибка получения статуса:', error);
+    res.status(500).json({ error: 'Ошибка получения статуса' });
   }
 });
 
-// ✅ ДОБАВЛЕНО: Получение рисунков для угадывания
-router.get('/:roomId/drawings-to-guess', authenticateToken, async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const userId = req.user.userId;
-    
-    console.log('🔄 Получение рисунков для угадывания пользователем:', userId);
-
-    // Получаем текущий раунд
-    const roomResult = await query(`
-      SELECT currentround FROM games WHERE gameid = $1
-    `, [roomId]);
-
-    if (roomResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Комната не найдена' });
-    }
-
-    const currentRound = roomResult.rows[0].currentround;
-
-    // Получаем roundid
-    const roundResult = await query(`
-      SELECT roundid, status FROM rounds 
-      WHERE gameid = $1 AND roundnumber = $2
-    `, [roomId, currentRound]);
-
-    if (roundResult.rows.length === 0) {
-      return res.status(400).json({ error: 'Раунд не найден' });
-    }
-
-    const roundId = roundResult.rows[0].roundid;
-
-    // Получаем все рисунки кроме своего
-    const drawingsResult = await query(`
-      SELECT 
-        d.userid,
-        u.login,
-        d.drawingdata,
-        rc.actiondata as original_word,
-        EXISTS(
-          SELECT 1 FROM guesses g 
-          WHERE g.roundid = $1 AND g.userid = $2 AND g.guess_for_userid = d.userid
-        ) as already_guessed
-      FROM drawings d
-      LEFT JOIN users u ON d.userid = u.userid
-      LEFT JOIN round_chain rc ON d.roundid = rc.roundid AND d.userid = rc.userid AND rc.actiontype = 'drawing'
-      WHERE d.roundid = $1 AND d.userid != $2
-      ORDER BY d.createdat
-    `, [roundId, userId]);
-
-    console.log('✅ Найдено рисунков для угадывания:', drawingsResult.rows.length);
-    
-    res.json({
-      success: true,
-      drawings: drawingsResult.rows,
-      totalDrawings: drawingsResult.rows.length
-    });
-
-  } catch (error) {
-    console.error('❌ Ошибка получения рисунков для угадывания:', error);
-    res.status(500).json({ error: 'Ошибка получения рисунков для угадывания' });
-  }
-});
-
-// ✅ ДОБАВЛЕНО: Отправка догадки
-router.post('/:roomId/guess', authenticateToken, async (req, res) => {
-  try {
-    const { roomId } = req.params;
-    const { guess, artistUserId } = req.body;
-    const userId = req.user.userId;
-    
-    console.log('💭 Отправка догадки:', guess, 'для художника:', artistUserId, 'от пользователя:', userId);
-
-    // Получаем текущий раунд
-    const roomResult = await query(`
-      SELECT currentround FROM games WHERE gameid = $1
-    `, [roomId]);
-
-    if (roomResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Комната не найдена' });
-    }
-
-    const currentRound = roomResult.rows[0].currentround;
-
-    // Получаем roundid
-    const roundResult = await query(`
-      SELECT roundid FROM rounds 
-      WHERE gameid = $1 AND roundnumber = $2
-    `, [roomId, currentRound]);
-
-    if (roundResult.rows.length === 0) {
-      return res.status(400).json({ error: 'Раунд не найден' });
-    }
-
-    const roundId = roundResult.rows[0].roundid;
-
-    // Проверяем, не отгадывал ли уже пользователь этого художника
-    const existingGuess = await query(`
-      SELECT * FROM guesses 
-      WHERE roundid = $1 AND userid = $2 AND guess_for_userid = $3
-    `, [roundId, userId, artistUserId]);
-
-    if (existingGuess.rows.length > 0) {
-      return res.status(400).json({ error: 'Вы уже отгадывали этого художника' });
-    }
-
-    // Сохраняем догадку
-    await query(`
-      INSERT INTO guesses (roundid, userid, guess_for_userid, guess)
-      VALUES ($1, $2, $3, $4)
-    `, [roundId, userId, artistUserId, guess]);
-
-    console.log('✅ Догадка сохранена');
-
-    res.json({
-      success: true,
-      message: 'Догадка отправлена'
-    });
-
-  } catch (error) {
-    console.error('❌ Ошибка отправки догадки:', error);
-    res.status(500).json({ error: 'Ошибка отправки догадки: ' + error.message });
-  }
-});
-
-// ✅ ДОБАВЛЕНО: Принудительный переход к угадыванию (для хоста)
+// ✅ ПРОСТОЙ ЭНДПОИНТ ПРИНУДИТЕЛЬНОГО ПЕРЕХОДА К УГАДЫВАНИЮ
 router.post('/:roomId/force-guessing', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     
-    console.log('🚀 Принудительный переход к угадыванию для комнаты:', roomId);
+    console.log('🚀 ПРИНУДИТЕЛЬНЫЙ ПЕРЕХОД - room:', roomId);
 
     // Проверяем, что пользователь - хост
-    const hostCheck = await query(`
-      SELECT ishost FROM game_players 
-      WHERE gameid = $1 AND userid = $2 AND ishost = true
-    `, [roomId, req.user.userId]);
-
+    const hostCheck = await query(`SELECT ishost FROM game_players WHERE gameid = $1 AND userid = $2 AND ishost = true`, [roomId, req.user.userId]);
     if (hostCheck.rows.length === 0) {
-      console.log('❌ User is not host');
-      return res.status(403).json({ error: 'Только хост может принудительно перейти к угадыванию' });
+      return res.status(403).json({ error: 'Только хост может перейти к угадыванию' });
     }
 
     // Получаем текущий раунд
-    const roomResult = await query(`
-      SELECT currentround FROM games WHERE gameid = $1
-    `, [roomId]);
-
+    const roomResult = await query(`SELECT currentround FROM games WHERE gameid = $1`, [roomId]);
     if (roomResult.rows.length === 0) {
       return res.status(404).json({ error: 'Комната не найдена' });
     }
@@ -1102,11 +801,7 @@ router.post('/:roomId/force-guessing', authenticateToken, async (req, res) => {
     const currentRound = roomResult.rows[0].currentround;
 
     // Получаем roundid
-    const roundResult = await query(`
-      SELECT roundid FROM rounds 
-      WHERE gameid = $1 AND roundnumber = $2
-    `, [roomId, currentRound]);
-
+    const roundResult = await query(`SELECT roundid FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, currentRound]);
     if (roundResult.rows.length === 0) {
       return res.status(400).json({ error: 'Раунд не найден' });
     }
@@ -1114,20 +809,18 @@ router.post('/:roomId/force-guessing', authenticateToken, async (req, res) => {
     const roundId = roundResult.rows[0].roundid;
 
     // Обновляем статус раунда
-    await query(`
-      UPDATE rounds SET status = 'guessing' WHERE roundid = $1
-    `, [roundId]);
+    await query(`UPDATE rounds SET status = 'guessing' WHERE roundid = $1`, [roundId]);
 
-    console.log('✅ Принудительный переход к угадыванию выполнен');
+    console.log('✅ Переход к угадыванию!');
 
     res.json({
       success: true,
-      message: 'Этап угадывания запущен'
+      message: 'Этап угадывания запущен!'
     });
 
   } catch (error) {
-    console.error('❌ Ошибка принудительного перехода к угадыванию:', error);
-    res.status(500).json({ error: 'Ошибка принудительного перехода к угадыванию: ' + error.message });
+    console.error('❌ Ошибка перехода:', error);
+    res.status(500).json({ error: 'Ошибка перехода: ' + error.message });
   }
 });
 
