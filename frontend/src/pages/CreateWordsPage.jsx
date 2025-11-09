@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom"; // ✅ ДОБАВЛЕН useParams
 import "./CreateWordsPage.css";
 import { useAuth } from '../context/AuthContext';
 
 export default function CreateWordsPage({ onSubmitWords, players = [], roomCode }) {
   const navigate = useNavigate();
+  const { roomId } = useParams(); // ✅ ПОЛУЧАЕМ roomId ИЗ URL
   const { user } = useAuth();
   const [word, setWord] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -20,22 +21,34 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
     "Динозавр", "Корабль", "Сердце", "Корона", "Дракон"
   ];
 
-  // ✅ ДОБАВЛЕНА ПРОВЕРКА roomCode
+  // ✅ УЛУЧШЕННАЯ ПРОВЕРКА - используем roomId из URL если roomCode не пришел
+  const getActualRoomCode = useCallback(() => {
+    const actualCode = roomCode || roomId;
+    console.log('🔍 getActualRoomCode:', { roomCode, roomId, actualCode });
+    return actualCode;
+  }, [roomCode, roomId]);
+
   const isValidRoomCode = useCallback(() => {
-    return roomCode && roomCode !== 'undefined' && roomCode !== 'null' && roomCode !== '';
-  }, [roomCode]);
+    const actualCode = getActualRoomCode();
+    const isValid = actualCode && actualCode !== 'undefined' && actualCode !== 'null' && actualCode !== '';
+    console.log('🔍 isValidRoomCode check:', { actualCode, isValid });
+    return isValid;
+  }, [getActualRoomCode]);
 
   // Загрузка данных игры в реальном времени
   const loadGameData = useCallback(async () => {
-    // ✅ ПРОВЕРКА roomCode
+    const actualRoomCode = getActualRoomCode();
+    
     if (!isValidRoomCode()) {
-      console.error('❌ Invalid roomCode in loadGameData:', roomCode);
+      console.error('❌ Invalid roomCode in loadGameData:', actualRoomCode);
       return;
     }
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}`, {
+      console.log('🔄 Загружаем данные игры для комнаты:', actualRoomCode);
+      
+      const response = await fetch(`/api/game/${actualRoomCode}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -46,31 +59,36 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
         if (isMountedRef.current) {
           setGameData(data);
           
-          // Обновляем таймер с сервера если есть
           if (data.room?.timeLeft) {
             setTimeLeft(data.room.timeLeft);
           }
           
-          // Проверяем статус текущего пользователя
           const currentPlayer = data.players?.find(p => p.userid === user?.userid);
           if (currentPlayer?.hasSubmittedWord) {
             setSubmitted(true);
           }
         }
+      } else {
+        console.error('❌ Ошибка загрузки данных игры:', response.status);
       }
     } catch (error) {
-      console.error('Ошибка загрузки данных игры:', error);
+      console.error('❌ Ошибка загрузки данных игры:', error);
     }
-  }, [roomCode, user, isValidRoomCode]);
+  }, [getActualRoomCode, isValidRoomCode, user]);
 
   useEffect(() => {
-    // ✅ ПРОВЕРКА roomCode
+    const actualRoomCode = getActualRoomCode();
+    
     if (!isValidRoomCode()) {
-      console.error('❌ Invalid roomCode in useEffect:', roomCode);
+      console.error('❌ Invalid roomCode in useEffect:', actualRoomCode);
+      alert('Некорректный ID комнаты. Перезагрузите страницу.');
+      navigate('/choose-mode');
       return;
     }
 
     isMountedRef.current = true;
+    
+    console.log('🎮 CreateWordsPage mounted with roomCode:', actualRoomCode);
     
     // Загружаем данные игры
     loadGameData();
@@ -82,7 +100,7 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
     let ws = null;
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/game/${roomCode}`;
+      const wsUrl = `${protocol}//${window.location.host}/ws/game/${actualRoomCode}`;
       ws = new WebSocket(wsUrl);
       
       ws.onmessage = (event) => {
@@ -92,9 +110,8 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
         }
         
         if (data.type === 'ALL_WORDS_SUBMITTED') {
-          // Все слова собраны, переходим к рисованию
           if (onSubmitWords) {
-            onSubmitWords([word], roomCode);
+            onSubmitWords([word], actualRoomCode);
           }
         }
       };
@@ -108,7 +125,7 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
       if (ws) ws.close();
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [loadGameData, roomCode, onSubmitWords, word, isValidRoomCode]);
+  }, [loadGameData, getActualRoomCode, isValidRoomCode, onSubmitWords, word, navigate]);
 
   // Таймер на клиенте как fallback
   useEffect(() => {
@@ -128,18 +145,28 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
   }, [timeLeft, submitted]);
 
   const handleSubmit = async () => {
-    // ✅ ПРОВЕРКА roomCode
+    const actualRoomCode = getActualRoomCode();
+    
+    console.log('🎯 handleSubmit called:', {
+      roomCode,
+      roomId,
+      actualRoomCode,
+      word: word.trim(),
+      isValid: isValidRoomCode()
+    });
+    
     if (!isValidRoomCode()) {
-      console.error('❌ Invalid roomCode in handleSubmit:', roomCode);
-      alert('Некорректный ID комнаты');
+      console.error('❌ Invalid roomCode in handleSubmit:', actualRoomCode);
+      alert('Некорректный ID комнаты. Перезагрузите страницу.');
       return;
     }
 
     if (word.trim()) {
       try {
-        // Отправляем слово на сервер
         const token = localStorage.getItem('token');
-        const response = await fetch(`/api/game/${roomCode}/word`, {
+        console.log('🔄 Отправляем слово в комнату:', actualRoomCode);
+        
+        const response = await fetch(`/api/game/${actualRoomCode}/word`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -154,14 +181,16 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
           console.log('✅ Слово отправлено на сервер');
           setSubmitted(true);
           if (onSubmitWords) {
-            onSubmitWords([word.trim()], roomCode);
+            onSubmitWords([word.trim()], actualRoomCode);
           }
         } else {
-          alert('Ошибка отправки слова');
+          const errorText = await response.text();
+          console.error('❌ Ошибка отправки слова:', errorText);
+          alert('Ошибка отправки слова: ' + errorText);
         }
       } catch (error) {
-        console.error('Ошибка:', error);
-        alert('Ошибка отправки слова');
+        console.error('❌ Ошибка:', error);
+        alert('Ошибка отправки слова: ' + error.message);
       }
     } else {
       alert("Пожалуйста, введите слово!");
@@ -169,9 +198,10 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
   };
 
   const handleAutoSubmit = async () => {
-    // ✅ ПРОВЕРКА roomCode
+    const actualRoomCode = getActualRoomCode();
+    
     if (!isValidRoomCode()) {
-      console.error('❌ Invalid roomCode in handleAutoSubmit:', roomCode);
+      console.error('❌ Invalid roomCode in handleAutoSubmit:', actualRoomCode);
       return;
     }
 
@@ -183,7 +213,7 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/word`, {
+      const response = await fetch(`/api/game/${actualRoomCode}/word`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -197,11 +227,11 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
       if (response.ok) {
         setSubmitted(true);
         if (onSubmitWords) {
-          onSubmitWords([finalWord], roomCode);
+          onSubmitWords([finalWord], actualRoomCode);
         }
       }
     } catch (error) {
-      console.error('Ошибка авто-отправки:', error);
+      console.error('❌ Ошибка авто-отправки:', error);
     }
   };
 
@@ -212,7 +242,6 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
   };
 
   const getPlayerStatus = (player) => {
-    // Используем данные с сервера о статусе игрока
     if (player.hasSubmittedWord || player.wordSubmitted) {
       return "submitted";
     }
@@ -230,6 +259,8 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
   const submittedCount = actualPlayers.filter(p => getPlayerStatus(p) === 'submitted').length;
   const allSubmitted = submittedCount === actualPlayers.length && actualPlayers.length > 0;
 
+  const actualRoomCode = getActualRoomCode();
+
   return (
     <div className="create-words-container">
       <header className="words-header">
@@ -238,7 +269,7 @@ export default function CreateWordsPage({ onSubmitWords, players = [], roomCode 
         </button>
         <div className="words-title">
           <h1>🎯 Придумайте слово для игры</h1>
-          <div className="room-info">Комната: {roomCode}</div>
+          <div className="room-info">Комната: {actualRoomCode || 'Загрузка...'}</div>
         </div>
         <div className="timer-section">
           <div className={`timer ${timeLeft <= 10 ? 'urgent' : ''}`}>
