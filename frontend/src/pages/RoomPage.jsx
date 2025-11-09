@@ -17,39 +17,8 @@ function RoomPage() {
   const isLoadingRef = useRef(false);
   const mountedRef = useRef(true);
 
-  // ✅ ДОБАВЛЕНО: Функция автоматического присоединения к комнате
-  const joinRoomAutomatically = useCallback(async () => {
-    if (!roomId || !user) return;
-    
-    try {
-      const token = localStorage.getItem('token');
-      console.log('🎯 Автоматическое присоединение к комнате:', roomId);
-      
-      const response = await fetch(`/api/game/${roomId}/join`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({})
-      });
-
-      if (response.ok) {
-        console.log('✅ Успешно присоединились к комнате');
-        // Перезагружаем данные комнаты после присоединения
-        setTimeout(loadRoomData, 500);
-      } else {
-        const errorData = await response.json();
-        console.error('❌ Ошибка присоединения:', errorData);
-      }
-    } catch (error) {
-      console.error('❌ Ошибка автоматического присоединения:', error);
-    }
-  }, [roomId, user, loadRoomData]);
-
-  // Загрузка данных комнаты и игроков
+  // ✅ ПЕРЕМЕСТИ loadRoomData ВПЕРЕД
   const loadRoomData = useCallback(async () => {
-    // ✅ ДОБАВЬ ЭТУ ПРОВЕРКУ В НАЧАЛЕ:
     if (!roomId || roomId === 'undefined' || roomId === 'null' || roomId === '') {
       console.error('❌ Invalid roomId in RoomPage:', roomId);
       if (mountedRef.current) {
@@ -84,13 +53,6 @@ function RoomPage() {
         throw new Error('Некорректный формат данных комнаты');
       }
       
-      // ✅ ДОБАВЛЕНО: Автоматическое присоединение если пользователь не в комнате
-      const currentPlayer = data.players?.find(p => p.userid === user?.userid);
-      if (!currentPlayer && data.room.status === 'waiting' && user) {
-        console.log('🔄 Пользователь не в комнате, присоединяем...');
-        setTimeout(joinRoomAutomatically, 1000);
-      }
-      
       if (mountedRef.current) {
         setRoomInfo(data.room);
         setPlayers(data.players || []);
@@ -103,7 +65,6 @@ function RoomPage() {
       if (mountedRef.current) {
         setError(`Не удалось загрузить данные комнаты: ${error.message}`);
         
-        // Используем мок-данные только если комната не найдена (404)
         if (error.message.includes('404') || error.message.includes('не найдена')) {
           console.log('🎮 Используем тестовые данные');
           const mockRoomData = {
@@ -139,7 +100,37 @@ function RoomPage() {
       }
       isLoadingRef.current = false;
     }
-  }, [roomId, user, joinRoomAutomatically]);
+  }, [roomId, user]);
+
+  // ✅ ТЕПЕРЬ joinRoomAutomatically МОЖЕТ ИСПОЛЬЗОВАТЬ loadRoomData
+  const joinRoomAutomatically = useCallback(async () => {
+    if (!roomId || !user) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      console.log('🎯 Автоматическое присоединение к комнате:', roomId);
+      
+      const response = await fetch(`/api/game/${roomId}/join`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({})
+      });
+
+      if (response.ok) {
+        console.log('✅ Успешно присоединились к комнате');
+        // Перезагружаем данные комнаты после присоединения
+        loadRoomData();
+      } else {
+        const errorData = await response.json();
+        console.error('❌ Ошибка присоединения:', errorData);
+      }
+    } catch (error) {
+      console.error('❌ Ошибка автоматического присоединения:', error);
+    }
+  }, [roomId, user, loadRoomData]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -150,18 +141,19 @@ function RoomPage() {
     // Интервал для обновления каждые 2 секунды
     const interval = setInterval(loadRoomData, 2000);
     
-    // ✅ ДОБАВЛЕНО: Автоматическое присоединение через 2 секунды
+    // ✅ ДОБАВЛЕНО: Автоматическое присоединение через 3 секунды
     const autoJoinTimeout = setTimeout(() => {
-      if (roomInfo?.status === 'waiting' && user) {
+      if (user) {
+        // Проверяем есть ли пользователь в комнате
         const isPlayerInRoom = players.some(p => p.userid === user.userid);
-        if (!isPlayerInRoom) {
+        if (!isPlayerInRoom && roomInfo?.status === 'waiting') {
           console.log('⏰ Автоматическое присоединение по таймауту');
           joinRoomAutomatically();
         }
       }
-    }, 2000);
+    }, 3000);
 
-    // WebSocket для реального времени (если поддерживается бэкендом)
+    // WebSocket для реального времени
     let ws = null;
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -177,12 +169,10 @@ function RoomPage() {
         console.log('WebSocket сообщение:', data);
         
         if (data.type === 'PLAYER_JOINED' || data.type === 'PLAYER_LEFT' || data.type === 'PLAYER_READY') {
-          // Обновляем данные при изменении состава игроков
           loadRoomData();
         }
         
         if (data.type === 'GAME_STARTED') {
-          // Запускаем отсчет если игра начата
           startCountdown();
         }
       };
@@ -201,7 +191,7 @@ function RoomPage() {
     return () => {
       mountedRef.current = false;
       clearInterval(interval);
-      clearTimeout(autoJoinTimeout); // ✅ ОЧИСТКА ТАЙМЕРА
+      clearTimeout(autoJoinTimeout);
       if (ws) {
         ws.close();
       }
@@ -219,7 +209,6 @@ function RoomPage() {
           clearInterval(countdownInterval);
           setTimeout(() => {
             setShowCountdown(false);
-            // Переходим на страницу создания слов
             navigate(`/room/${roomId}/create-words`);
           }, 1000);
           return 0;
@@ -252,14 +241,12 @@ function RoomPage() {
       const result = await response.json();
       console.log('✅ Статус готовности изменен:', result);
       
-      // Перезагружаем данные после изменения
       await loadRoomData();
       
     } catch (error) {
       console.error('❌ Ошибка:', error);
       alert(`Не удалось изменить статус готовности: ${error.message}`);
       
-      // Локально меняем статус если эндпоинт не работает
       const updatedPlayers = players.map(player => 
         player.userid === user?.userid 
           ? { ...player, ready: !player.ready }
@@ -290,7 +277,6 @@ function RoomPage() {
       const result = await response.json();
       console.log('✅ Игра начата:', result);
       
-      // Запускаем красивый отсчет вместо обычного alert
       startCountdown();
       
     } catch (error) {
@@ -343,7 +329,6 @@ function RoomPage() {
     );
   }
 
-  // Определяем текущего пользователя в списке игроков
   const currentPlayer = players.find(p => p.userid === user?.userid);
   const youReady = currentPlayer?.ready || false;
   const youAreHost = currentPlayer?.ishost || false;
@@ -355,7 +340,6 @@ function RoomPage() {
 
   return (
     <>
-      {/* Полноэкранный отсчет */}
       {showCountdown && (
         <div className="countdown-overlay">
           <div className="countdown-container">
@@ -473,7 +457,6 @@ function RoomPage() {
               ))}
             </div>
 
-            {/* КНОПКА ГОТОВНОСТИ ДЛЯ ВСЕХ ИГРОКОВ (ВКЛЮЧАЯ ХОСТА) */}
             {roomInfo.status === 'waiting' && currentPlayer && (
               <div className="ready-section">
                 <button
@@ -490,7 +473,6 @@ function RoomPage() {
               </div>
             )}
 
-            {/* Кнопка начала игры для хоста */}
             {youAreHost && roomInfo.status === 'waiting' && (
               <button 
                 className={`play-button ${allReady ? 'active' : 'disabled'}`}
