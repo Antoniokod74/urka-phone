@@ -16,8 +16,8 @@ function RoomPage() {
 
   const isLoadingRef = useRef(false);
   const mountedRef = useRef(true);
+  const hasJoinedRef = useRef(false); // ✅ Следим за тем присоединились ли мы
 
-  // ✅ ПЕРЕМЕСТИ loadRoomData ВПЕРЕД
   const loadRoomData = useCallback(async () => {
     if (!roomId || roomId === 'undefined' || roomId === 'null' || roomId === '') {
       console.error('❌ Invalid roomId in RoomPage:', roomId);
@@ -102,9 +102,8 @@ function RoomPage() {
     }
   }, [roomId, user]);
 
-  // ✅ ТЕПЕРЬ joinRoomAutomatically МОЖЕТ ИСПОЛЬЗОВАТЬ loadRoomData
   const joinRoomAutomatically = useCallback(async () => {
-    if (!roomId || !user) return;
+    if (!roomId || !user || hasJoinedRef.current) return;
     
     try {
       const token = localStorage.getItem('token');
@@ -121,8 +120,9 @@ function RoomPage() {
 
       if (response.ok) {
         console.log('✅ Успешно присоединились к комнате');
+        hasJoinedRef.current = true; // ✅ Помечаем что присоединились
         // Перезагружаем данные комнаты после присоединения
-        loadRoomData();
+        setTimeout(loadRoomData, 500);
       } else {
         const errorData = await response.json();
         console.error('❌ Ошибка присоединения:', errorData);
@@ -134,26 +134,36 @@ function RoomPage() {
 
   useEffect(() => {
     mountedRef.current = true;
+    hasJoinedRef.current = false; // ✅ Сбрасываем при монтировании
     
     // Первоначальная загрузка
     loadRoomData();
     
-    // Интервал для обновления каждые 2 секунды
-    const interval = setInterval(loadRoomData, 2000);
+    // ✅ УВЕЛИЧИВАЕМ ЧАСТОТУ ОБНОВЛЕНИЯ - КАЖДУЮ СЕКУНДУ
+    const interval = setInterval(loadRoomData, 1000);
     
-    // ✅ ДОБАВЛЕНО: Автоматическое присоединение через 3 секунды
+    // ✅ УЛУЧШАЕМ АВТОМАТИЧЕСКОЕ ПРИСОЕДИНЕНИЕ
     const autoJoinTimeout = setTimeout(() => {
-      if (user) {
-        // Проверяем есть ли пользователь в комнате
+      if (user && roomId) {
         const isPlayerInRoom = players.some(p => p.userid === user.userid);
         if (!isPlayerInRoom && roomInfo?.status === 'waiting') {
           console.log('⏰ Автоматическое присоединение по таймауту');
           joinRoomAutomatically();
         }
       }
-    }, 3000);
+    }, 2000);
 
-    // WebSocket для реального времени
+    // ✅ ДОБАВЛЯЕМ РЕЗЕРВНОЕ ПРИСОЕДИНЕНИЕ
+    const backupJoinTimeout = setTimeout(() => {
+      if (user && roomId && !hasJoinedRef.current) {
+        console.log('🔄 Резервное присоединение к комнате');
+        joinRoomAutomatically();
+      }
+    }, 5000);
+
+    // ✅ ОТКЛЮЧАЕМ WEBSOCKET ИЗ-ЗА ОШИБОК
+    // WebSocket вызывает ошибки, поэтому временно отключаем
+    /*
     let ws = null;
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -187,14 +197,16 @@ function RoomPage() {
     } catch (error) {
       console.log('WebSocket не поддерживается, используем polling');
     }
+    */
 
     return () => {
       mountedRef.current = false;
       clearInterval(interval);
       clearTimeout(autoJoinTimeout);
-      if (ws) {
-        ws.close();
-      }
+      clearTimeout(backupJoinTimeout);
+      // if (ws) {
+      //   ws.close();
+      // }
     };
   }, [loadRoomData, roomId, roomInfo, players, user, joinRoomAutomatically]);
 
@@ -300,6 +312,11 @@ function RoomPage() {
 
   const handleBack = () => {
     navigate('/choose-mode');
+  };
+
+  // ✅ ДОБАВЛЯЕМ ФУНКЦИЮ ДЛЯ РУЧНОГО ПРИСОЕДИНЕНИЯ
+  const handleManualJoin = async () => {
+    await joinRoomAutomatically();
   };
 
   if (loading) {
@@ -425,6 +442,21 @@ function RoomPage() {
                 <span className="live-indicator">●</span> Live
               </div>
             </div>
+
+            {/* ✅ ДОБАВЛЯЕМ КНОПКУ РУЧНОГО ПРИСОЕДИНЕНИЯ */}
+            {!currentPlayer && roomInfo.status === 'waiting' && (
+              <div className="join-manual-section">
+                <button 
+                  className="join-manual-button"
+                  onClick={handleManualJoin}
+                >
+                  🎯 Присоединиться к игре
+                </button>
+                <div className="join-hint">
+                  Нажмите чтобы появиться в списке игроков
+                </div>
+              </div>
+            )}
 
             <div className="players-grid">
               {players.map((player) => (
