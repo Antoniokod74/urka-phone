@@ -584,7 +584,7 @@ router.get('/:roomId/words-status', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ ЗАПУСКА РИСОВАНИЯ
+// ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ ЗАПУСКА РИСОВАНИЯ - С ПРАВИЛЬНОЙ ЦЕПОЧКОЙ
 router.post('/:roomId/start-drawing', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -621,28 +621,41 @@ router.post('/:roomId/start-drawing', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Не все игроки отправили слова' });
     }
 
-    // Создаем цепочку слов
+    // Получаем всех игроков в правильном порядке
     const allPlayers = await query(`SELECT userid, playerorder FROM game_players WHERE gameid = $1 ORDER BY playerorder`, [roomId]);
     const allWords = await query(`SELECT userid, phrase FROM round_phrases WHERE roundid = $1`, [roundId]);
 
+    console.log('👥 Игроки:', allPlayers.rows.map(p => ({userid: p.userid, order: p.playerorder})));
+    console.log('📝 Слова:', allWords.rows.map(w => ({userid: w.userid, word: w.phrase})));
+
+    // Очищаем старую цепочку если есть
+    await query(`DELETE FROM round_chain WHERE roundid = $1`, [roundId]);
+
+    // Создаем цепочку слов - КАЖДЫЙ получает слово ПРЕДЫДУЩЕГО игрока
     for (let i = 0; i < allPlayers.rows.length; i++) {
       const currentPlayer = allPlayers.rows[i];
+      
+      // Находим предыдущего игрока в порядке
       const prevIndex = (i - 1 + allPlayers.rows.length) % allPlayers.rows.length;
       const prevPlayer = allPlayers.rows[prevIndex];
+      
+      // Находим слово предыдущего игрока
       const prevWord = allWords.rows.find(w => w.userid === prevPlayer.userid);
+      
+      console.log(`🔄 Игрок ${currentPlayer.userid} (порядок: ${currentPlayer.playerorder}) получает слово игрока ${prevPlayer.userid}: "${prevWord?.phrase}"`);
       
       if (prevWord) {
         await query(`
           INSERT INTO round_chain (roundid, userid, actiontype, actiondata, actionorder)
           VALUES ($1, $2, 'drawing', $3, $4)
-        `, [roundId, currentPlayer.userid, prevWord.phrase, i + 1]);
+        `, [roundId, currentPlayer.userid, prevWord.phrase, currentPlayer.playerorder]);
       }
     }
 
-    // Обновляем статус раунда (используем 'drawing' который точно работает)
+    // Обновляем статус раунда
     await query(`UPDATE rounds SET status = 'drawing' WHERE roundid = $1`, [roundId]);
 
-    console.log('✅ Рисование запущено!');
+    console.log('✅ Рисование запущено! Цепочка создана.');
 
     res.json({
       success: true,
@@ -750,13 +763,13 @@ router.post('/:roomId/save-drawing', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ПРОСТОЙ ЭНДПОИНТ ЗАВЕРШЕНИЯ РИСОВАНИЯ
+// ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ ЗАВЕРШЕНИЯ РИСОВАНИЯ
 router.post('/:roomId/finish-drawing', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
     const userId = req.user.userId;
     
-    console.log('✅ ЗАВЕРШЕНИЕ РИСОВАНИЯ - user:', userId);
+    console.log('✅ ЗАВЕРШЕНИЕ РИСОВАНИЯ - room:', roomId, 'user:', userId);
 
     // Получаем текущий раунд
     const roomResult = await query(`SELECT currentround FROM games WHERE gameid = $1`, [roomId]);
@@ -774,12 +787,24 @@ router.post('/:roomId/finish-drawing', authenticateToken, async (req, res) => {
 
     const roundId = roundResult.rows[0].roundid;
 
-    // Отмечаем завершение
-    await query(`
-      UPDATE round_chain 
-      SET actiontype = 'drawing_completed' 
-      WHERE roundid = $1 AND userid = $2 AND actiontype = 'drawing'
-    `, [roundId, userId]);
+    // Проверяем существование записи в round_chain
+    const chainCheck = await query(`SELECT * FROM round_chain WHERE roundid = $1 AND userid = $2 AND actiontype = 'drawing'`, [roundId, userId]);
+    
+    if (chainCheck.rows.length === 0) {
+      console.log('❌ Запись в round_chain не найдена, создаем новую');
+      // Создаем запись если ее нет
+      await query(`
+        INSERT INTO round_chain (roundid, userid, actiontype, actiondata, actionorder)
+        VALUES ($1, $2, 'drawing_completed', 'completed', 1)
+      `, [roundId, userId]);
+    } else {
+      // Обновляем существующую запись
+      await query(`
+        UPDATE round_chain 
+        SET actiontype = 'drawing_completed' 
+        WHERE roundid = $1 AND userid = $2 AND actiontype = 'drawing'
+      `, [roundId, userId]);
+    }
 
     console.log('✅ Рисование завершено!');
 
@@ -926,6 +951,63 @@ router.get('/:roomId/debug-rounds', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('❌ DEBUG ошибка:', error);
+    res.status(500).json({ error: 'DEBUG ошибка: ' + error.message });
+  }
+});
+
+// ✅ ДОБАВЛЕНО: Эндпоинт для проверки цепочки слов
+router.get('/:roomId/debug-chain', authenticateToken, async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    console.log('🔗 DEBUG - проверка цепочки для комнаты:', roomId);
+
+    // Получаем текущий раунд
+    const roomResult = await query(`SELECT currentround FROM games WHERE gameid = $1`, [roomId]);
+    if (roomResult.rows.length === 0) {
+      return res.json({ error: 'Комната не найдена' });
+    }
+
+    const currentRound = roomResult.rows[0].currentround;
+
+    // Получаем roundid
+    const roundResult = await query(`SELECT roundid FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, currentRound]);
+    if (roundResult.rows.length === 0) {
+      return res.json({ error: 'Раунд не найден' });
+    }
+
+    const roundId = roundResult.rows[0].roundid;
+
+    // Получаем игроков
+    const playersResult = await query(`
+      SELECT gp.userid, u.login, gp.playerorder 
+      FROM game_players gp
+      LEFT JOIN users u ON gp.userid = u.userid
+      WHERE gp.gameid = $1
+      ORDER BY gp.playerorder
+    `, [roomId]);
+
+    // Получаем слова
+    const wordsResult = await query(`SELECT userid, phrase FROM round_phrases WHERE roundid = $1`, [roundId]);
+
+    // Получаем цепочку
+    const chainResult = await query(`
+      SELECT rc.userid, u.login, rc.actiontype, rc.actiondata as word, rc.actionorder
+      FROM round_chain rc
+      LEFT JOIN users u ON rc.userid = u.userid
+      WHERE rc.roundid = $1
+      ORDER BY rc.actionorder
+    `, [roundId]);
+
+    res.json({
+      players: playersResult.rows,
+      words: wordsResult.rows,
+      chain: chainResult.rows,
+      message: 'Цепочка слов для отладки'
+    });
+
+  } catch (error) {
+    console.error('❌ DEBUG ошибка цепочки:', error);
     res.status(500).json({ error: 'DEBUG ошибка: ' + error.message });
   }
 });
