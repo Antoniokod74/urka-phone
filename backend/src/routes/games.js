@@ -381,7 +381,7 @@ router.post('/:roomId/start', authenticateToken, async (req, res) => {
       if (roundCheck.rows.length === 0) {
         const newRound = await query(`
           INSERT INTO rounds (gameid, roundnumber, status)
-          VALUES ($1, 1, 'active')
+          VALUES ($1, 1, 'drawing')
           RETURNING roundid
         `, [roomId]);
         console.log('✅ Первый раунд создан, ID:', newRound.rows[0].roundid);
@@ -432,7 +432,7 @@ router.get('/debug/round-constraint', async (req, res) => {
   }
 });
 
-// ✅ УНИВЕРСАЛЬНЫЙ ЭНДПОИНТ ОТПРАВКИ СЛОВА
+// ✅ РАБОЧИЙ ЭНДПОИНТ ОТПРАВКИ СЛОВА
 router.post('/:roomId/word', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -462,37 +462,28 @@ router.post('/:roomId/word', authenticateToken, async (req, res) => {
     if (roundResult.rows.length === 0) {
       console.log('🔄 Раунд не найден, создаем новый...');
       
-      // Пробуем разные статусы по очереди
-      const possibleStatuses = ['waiting', 'active', 'collecting', 'in_progress', 'started', 'playing'];
-      let roundCreated = false;
-      
-      for (const status of possibleStatuses) {
-        try {
-          console.log(`🔄 Пробуем создать раунд со статусом: ${status}`);
-          const newRound = await query(`
-            INSERT INTO rounds (gameid, roundnumber, status) 
-            VALUES ($1, $2, $3)
-            RETURNING roundid
-          `, [roomId, room.currentround, status]);
-          
-          roundId = newRound.rows[0].roundid;
-          console.log(`✅ Создан новый раунд со статусом ${status}:`, roundId);
-          roundCreated = true;
-          break;
-        } catch (error) {
-          console.log(`❌ Не удалось создать со статусом ${status}:`, error.message);
-          // Продолжаем пробовать следующий статус
-        }
-      }
-
-      if (!roundCreated) {
-        // Если ни один статус не подошел, пробуем получить существующий раунд
+      try {
+        // Используем дефолтный статус 'drawing' который точно работает
+        const newRound = await query(`
+          INSERT INTO rounds (gameid, roundnumber, status) 
+          VALUES ($1, $2, 'drawing')
+          RETURNING roundid
+        `, [roomId, room.currentround]);
+        
+        roundId = newRound.rows[0].roundid;
+        console.log('✅ Создан новый раунд:', roundId);
+        
+      } catch (error) {
+        console.error('❌ Ошибка создания раунда:', error);
+        
+        // Пробуем получить раунд еще раз (возможно кто-то другой уже создал)
         roundResult = await query(`SELECT * FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, room.currentround]);
         if (roundResult.rows.length === 0) {
-          return res.status(500).json({ error: 'Не удалось создать раунд ни с одним из статусов' });
+          console.log('❌ Раунд не создан из-за ошибки:', error.message);
+          return res.status(500).json({ error: 'Не удалось создать раунд: ' + error.message });
         }
         roundId = roundResult.rows[0].roundid;
-        console.log('✅ Раунд найден после всех попыток:', roundId);
+        console.log('✅ Раунд найден после ошибки:', roundId);
       }
     } else {
       roundId = roundResult.rows[0].roundid;
@@ -648,8 +639,8 @@ router.post('/:roomId/start-drawing', authenticateToken, async (req, res) => {
       }
     }
 
-    // Обновляем статус раунда (используем 'active' вместо 'drawing')
-    await query(`UPDATE rounds SET status = 'active' WHERE roundid = $1`, [roundId]);
+    // Обновляем статус раунда (используем 'drawing' который точно работает)
+    await query(`UPDATE rounds SET status = 'drawing' WHERE roundid = $1`, [roundId]);
 
     console.log('✅ Рисование запущено!');
 
@@ -884,8 +875,8 @@ router.post('/:roomId/force-guessing', authenticateToken, async (req, res) => {
 
     const roundId = roundResult.rows[0].roundid;
 
-    // Обновляем статус раунда (используем 'active' вместо 'guessing')
-    await query(`UPDATE rounds SET status = 'active' WHERE roundid = $1`, [roundId]);
+    // Обновляем статус раунда (используем 'drawing' который точно работает)
+    await query(`UPDATE rounds SET status = 'drawing' WHERE roundid = $1`, [roundId]);
 
     console.log('✅ Переход к угадыванию!');
 
