@@ -400,7 +400,39 @@ router.post('/:roomId/start', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ИСПРАВЛЕННЫЙ ЭНДПОИНТ ОТПРАВКИ СЛОВА - С ПРАВИЛЬНЫМИ СТАТУСАМИ
+// ✅ ДОБАВЛЕНО: Эндпоинт для проверки допустимых статусов
+router.get('/debug/round-constraint', async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT conname, pg_get_constraintdef(oid) as constraint_definition
+      FROM pg_constraint 
+      WHERE conname = 'rounds_status_check' 
+      AND conrelid = 'rounds'::regclass
+    `);
+    
+    if (result.rows.length === 0) {
+      return res.json({ error: 'Constraint не найден' });
+    }
+
+    const constraint = result.rows[0];
+    
+    // Также проверим существующие статусы в таблице
+    const existingStatuses = await query(`
+      SELECT DISTINCT status FROM rounds ORDER BY status
+    `);
+
+    res.json({
+      constraint: constraint,
+      existing_statuses: existingStatuses.rows
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка получения информации о constraint:', error);
+    res.status(500).json({ error: 'Ошибка: ' + error.message });
+  }
+});
+
+// ✅ УНИВЕРСАЛЬНЫЙ ЭНДПОИНТ ОТПРАВКИ СЛОВА
 router.post('/:roomId/word', authenticateToken, async (req, res) => {
   try {
     const { roomId } = req.params;
@@ -423,33 +455,44 @@ router.post('/:roomId/word', authenticateToken, async (req, res) => {
     
     console.log('🔍 Поиск раунда для комнаты:', roomId, 'раунд:', room.currentround);
 
-    // Получаем или создаем раунд с правильным статусом
+    // Получаем или создаем раунд
     let roundResult = await query(`SELECT * FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, room.currentround]);
     let roundId;
 
     if (roundResult.rows.length === 0) {
       console.log('🔄 Раунд не найден, создаем новый...');
-      try {
-        // Используем допустимый статус 'active' вместо 'collecting_words'
-        const newRound = await query(`
-          INSERT INTO rounds (gameid, roundnumber, status) 
-          VALUES ($1, $2, 'active')
-          RETURNING roundid
-        `, [roomId, room.currentround]);
-        
-        roundId = newRound.rows[0].roundid;
-        console.log('✅ Создан новый раунд:', roundId);
-      } catch (error) {
-        console.error('❌ Ошибка создания раунда:', error);
-        
-        // Пробуем получить раунд еще раз (возможно кто-то другой уже создал)
+      
+      // Пробуем разные статусы по очереди
+      const possibleStatuses = ['waiting', 'active', 'collecting', 'in_progress', 'started', 'playing'];
+      let roundCreated = false;
+      
+      for (const status of possibleStatuses) {
+        try {
+          console.log(`🔄 Пробуем создать раунд со статусом: ${status}`);
+          const newRound = await query(`
+            INSERT INTO rounds (gameid, roundnumber, status) 
+            VALUES ($1, $2, $3)
+            RETURNING roundid
+          `, [roomId, room.currentround, status]);
+          
+          roundId = newRound.rows[0].roundid;
+          console.log(`✅ Создан новый раунд со статусом ${status}:`, roundId);
+          roundCreated = true;
+          break;
+        } catch (error) {
+          console.log(`❌ Не удалось создать со статусом ${status}:`, error.message);
+          // Продолжаем пробовать следующий статус
+        }
+      }
+
+      if (!roundCreated) {
+        // Если ни один статус не подошел, пробуем получить существующий раунд
         roundResult = await query(`SELECT * FROM rounds WHERE gameid = $1 AND roundnumber = $2`, [roomId, room.currentround]);
         if (roundResult.rows.length === 0) {
-          console.log('❌ Раунд не создан из-за ошибки:', error.message);
-          return res.status(500).json({ error: 'Не удалось создать раунд: ' + error.message });
+          return res.status(500).json({ error: 'Не удалось создать раунд ни с одним из статусов' });
         }
         roundId = roundResult.rows[0].roundid;
-        console.log('✅ Раунд найден после ошибки:', roundId);
+        console.log('✅ Раунд найден после всех попыток:', roundId);
       }
     } else {
       roundId = roundResult.rows[0].roundid;
