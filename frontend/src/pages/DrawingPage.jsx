@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import "./DrawingPage.css";
 import { useAuth } from '../context/AuthContext';
 
-export default function DrawingPage({ roomCode, onDrawingComplete }) {
+export default function DrawingPage({ onDrawingComplete }) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { roomId } = useParams();
+  
   const canvasRef = useRef(null);
   const [currentWord, setCurrentWord] = useState("");
   const [isDrawing, setIsDrawing] = useState(false);
@@ -25,6 +27,11 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
   const timerRef = useRef(null);
   const isMountedRef = useRef(true);
   const lastPosRef = useRef({ x: 0, y: 0 });
+
+  // ✅ Используем roomId из URL
+  const roomCode = roomId;
+
+  console.log('🎨 DrawingPage mounted, roomCode from URL:', roomCode);
 
   const colors = [
     "#000000", "#FF0000", "#00FF00", "#0000FF", "#FFFF00",
@@ -95,7 +102,12 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
 
   // ✅ ПОЛУЧЕНИЕ СЛОВА ДЛЯ РИСОВАНИЯ
   const fetchDrawingWord = useCallback(async () => {
-    if (!roomCode) return;
+    if (!roomCode) {
+      console.error('❌ roomCode не указан');
+      setError("Не указан код комнаты");
+      setIsLoading(false);
+      return;
+    }
 
     try {
       console.log('🔄 Получаем слово для рисования...');
@@ -106,9 +118,11 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
         }
       });
 
+      console.log('📡 Ответ от сервера:', response.status);
+
       if (response.ok) {
         const data = await response.json();
-        console.log('📝 Ответ слова:', data);
+        console.log('📝 Данные слова:', data);
         
         if (data.success && data.word) {
           console.log('✅ Получено слово для рисования:', data.word);
@@ -177,7 +191,7 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
     }
   }, [roomCode, user, fetchDrawingWord, checkWordsStatus]);
 
-  // Остальные функции без изменений...
+  // ✅ СОХРАНЕНИЕ РИСУНКА
   const saveDrawing = useCallback(async (drawingData) => {
     if (!roomCode) return false;
     try {
@@ -197,6 +211,7 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
     }
   }, [roomCode]);
 
+  // ✅ ЗАВЕРШЕНИЕ РИСОВАНИЯ
   const finishDrawing = useCallback(async () => {
     if (!roomCode) return false;
     try {
@@ -219,16 +234,29 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
     if (roomCode) {
       loadGameData();
 
+      // Таймер для авто-завершения
+      const timer = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            handleTimeUp();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
       // Обновляем данные каждые 3 секунды
       const interval = setInterval(loadGameData, 3000);
 
       return () => {
         console.log('🎨 DrawingPage unmounted');
         isMountedRef.current = false;
+        clearInterval(timer);
         clearInterval(interval);
         if (timerRef.current) clearTimeout(timerRef.current);
       };
     } else {
+      console.error('❌ roomCode не передан в компонент');
       setError("Не указан код комнаты");
       setIsLoading(false);
     }
@@ -260,12 +288,13 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
+      console.log('✅ Canvas инициализирован');
     }
   }, []);
 
-  // Функции рисования (без изменений)
+  // Функции рисования
   const startDrawing = (e) => {
-    if (!currentWord) return; // Не позволяем рисовать без слова
+    if (!currentWord) return;
     
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -343,7 +372,8 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
         <div className="loading-spinner">🎨</div>
         <div className="loading-text">Загрузка игры...</div>
         <div className="loading-details">
-          Комната: {roomCode}
+          Комната: {roomCode}<br/>
+          Получаем слово для рисования...
         </div>
       </div>
     );
@@ -390,6 +420,9 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
           Статус: {gameStatus}<br/>
           {error && <div className="waiting-error">{error}</div>}
         </div>
+        <button className="retry-btn" onClick={retryLoad}>
+          Обновить
+        </button>
       </div>
     );
   }
@@ -399,14 +432,35 @@ export default function DrawingPage({ roomCode, onDrawingComplete }) {
       <div className="drawing-container error">
         <div className="error-icon">❌</div>
         <div className="error-text">{error}</div>
+        <div className="error-details">
+          Комната: {roomCode || 'не указана'}
+        </div>
         <button className="retry-btn" onClick={retryLoad}>
-          Обновить
+          Попробовать снова
+        </button>
+        <button className="back-btn" onClick={() => navigate('/')}>
+          Вернуться на главную
         </button>
       </div>
     );
   }
 
-  // ✅ СОСТОЯНИЕ: РИСОВАНИЕ АКТИВНО
+  if (!currentWord) {
+    return (
+      <div className="drawing-container error">
+        <div className="error-icon">🎨</div>
+        <div className="error-text">Не удалось загрузить слово для рисования</div>
+        <div className="error-details">
+          Комната: {roomCode}<br/>
+          Возможно, игра еще не началась или произошла ошибка.
+        </div>
+        <button className="retry-btn" onClick={retryLoad}>
+          Попробовать снова
+        </button>
+      </div>
+    );
+  }
+
   console.log('✅ Рендерим интерфейс рисования, слово:', currentWord);
 
   return (
