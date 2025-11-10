@@ -15,8 +15,9 @@ export default function DrawingPage({ onDrawingComplete }) {
   const [brushSize, setBrushSize] = useState(5);
   const [timeLeft, setTimeLeft] = useState(60);
   const [showWord, setShowWord] = useState(true);
-  const [isLoading, setIsLoading] = useState(false); // ← ИЗМЕНИЛИ НА false
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [lastUpdate, setLastUpdate] = useState(Date.now());
   
   const timerRef = useRef(null);
   const isMountedRef = useRef(true);
@@ -24,7 +25,7 @@ export default function DrawingPage({ onDrawingComplete }) {
 
   const roomCode = roomId;
 
-  console.log('🎨 DrawingPage mounted, roomCode from URL:', roomCode);
+  console.log('🎨 DrawingPage mounted, roomCode:', roomCode);
 
   const colors = [
     "#000000", "#FF0000", "#00FF00", "#0000FF", "#FFFF00",
@@ -34,7 +35,7 @@ export default function DrawingPage({ onDrawingComplete }) {
 
   const brushSizes = [2, 5, 10, 15, 20];
 
-  // ✅ ПОЛУЧЕНИЕ СЛОВА ДЛЯ РИСОВАНИЯ (упрощенная версия)
+  // ✅ ПОЛУЧАЕМ СЛОВО ДЛЯ РИСОВАНИЯ (от другого игрока - автор скрыт)
   const fetchDrawingWord = useCallback(async () => {
     if (!roomCode) {
       console.error('❌ roomCode не указан');
@@ -43,39 +44,79 @@ export default function DrawingPage({ onDrawingComplete }) {
     }
 
     try {
-      console.log('🔄 Получаем слово для рисования...');
       const token = localStorage.getItem('token');
+      if (!token) {
+        setError("Требуется авторизация");
+        return;
+      }
+
+      console.log('🔄 Получаем слово от другого игрока...');
       const response = await fetch(`http://urka-phone.ydns.eu/api/game/${roomCode}/my-drawing-word`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
 
-      console.log('📡 Ответ от сервера:', response.status);
-
       if (response.ok) {
         const data = await response.json();
-        console.log('📝 Данные слова:', data);
+        console.log('📝 Ответ сервера:', data);
         
         if (data.success && data.word) {
           console.log('✅ Получено слово для рисования:', data.word);
           setCurrentWord(data.word);
           setError("");
         } else {
-          console.log('ℹ️ Слово еще не доступно:', data.error);
-          setError("Слово для рисования еще не готово");
+          console.log('⏳ Слово еще не готово:', data.error || 'ожидаем');
         }
+      } else if (response.status === 401) {
+        setError("Ошибка авторизации");
       } else {
-        console.log('ℹ️ Слово не доступно (статус:', response.status, ')');
-        setError("Ожидаем запуска этапа рисования...");
+        console.log('⏳ Сервер не готов (статус:', response.status, ')');
       }
     } catch (error) {
-      console.error('❌ Ошибка получения слова:', error);
-      setError("Ошибка соединения с сервером");
+      console.error('❌ Ошибка запроса:', error);
     }
   }, [roomCode]);
 
-  // ✅ СОХРАНЕНИЕ РИСУНКА
+  // ✅ АВТООБНОВЛЕНИЕ
+  useEffect(() => {
+    if (!roomCode) return;
+
+    console.log('🚀 Запускаем автообновление...');
+    isMountedRef.current = true;
+
+    // Первая загрузка
+    fetchDrawingWord();
+
+    // Интервал для автообновления
+    const interval = setInterval(() => {
+      if (isMountedRef.current && !currentWord) {
+        console.log('🔄 Авто-проверка...');
+        setLastUpdate(Date.now());
+        fetchDrawingWord();
+      }
+    }, 3000);
+
+    // Таймер рисования
+    const timer = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          handleTimeUp();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      console.log('🧹 Очистка таймеров');
+      isMountedRef.current = false;
+      clearInterval(interval);
+      clearInterval(timer);
+    };
+  }, [roomCode, currentWord, fetchDrawingWord]);
+
+  // ✅ ФУНКЦИИ РИСОВАНИЯ
   const saveDrawing = useCallback(async (drawingData) => {
     if (!roomCode) return false;
     try {
@@ -90,12 +131,11 @@ export default function DrawingPage({ onDrawingComplete }) {
       });
       return response.ok;
     } catch (error) {
-      console.error('❌ Ошибка:', error);
+      console.error('❌ Ошибка сохранения:', error);
       return false;
     }
   }, [roomCode]);
 
-  // ✅ ЗАВЕРШЕНИЕ РИСОВАНИЯ
   const finishDrawing = useCallback(async () => {
     if (!roomCode) return false;
     try {
@@ -106,44 +146,13 @@ export default function DrawingPage({ onDrawingComplete }) {
       });
       return response.ok;
     } catch (error) {
-      console.error('❌ Ошибка:', error);
+      console.error('❌ Ошибка завершения:', error);
       return false;
     }
   }, [roomCode]);
 
-  useEffect(() => {
-    console.log('🎨 DrawingPage mounted, roomCode:', roomCode);
-    isMountedRef.current = true;
-    
-    if (roomCode) {
-      // Сразу пытаемся получить слово для рисования
-      fetchDrawingWord();
-
-      // Таймер для авто-завершения
-      const timer = setInterval(() => {
-        setTimeLeft(prev => {
-          if (prev <= 1) {
-            handleTimeUp();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      return () => {
-        console.log('🎨 DrawingPage unmounted');
-        isMountedRef.current = false;
-        clearInterval(timer);
-        if (timerRef.current) clearTimeout(timerRef.current);
-      };
-    } else {
-      console.error('❌ roomCode не передан в компонент');
-      setError("Не указан код комнаты");
-    }
-  }, [roomCode]);
-
   const handleTimeUp = useCallback(async () => {
-    console.log('🎨 Время вышло, завершаем рисование...');
+    console.log('🎨 Время вышло');
     const canvas = canvasRef.current;
     if (!canvas) return;
     
@@ -157,7 +166,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     }
   }, [saveDrawing, finishDrawing, onDrawingComplete]);
 
-  // Инициализация canvas
+  // ✅ ИНИЦИАЛИЗАЦИЯ CANVAS
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas) {
@@ -168,11 +177,10 @@ export default function DrawingPage({ onDrawingComplete }) {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      console.log('✅ Canvas инициализирован');
     }
   }, []);
 
-  // Функции рисования
+  // ✅ ФУНКЦИИ РИСОВАНИЯ
   const startDrawing = (e) => {
     if (!currentWord) return;
     
@@ -184,12 +192,10 @@ export default function DrawingPage({ onDrawingComplete }) {
     const y = e.clientY - rect.top;
     
     lastPosRef.current = { x, y };
-    
     ctx.strokeStyle = color;
     ctx.lineWidth = brushSize;
     ctx.beginPath();
     ctx.moveTo(x, y);
-    
     setIsDrawing(true);
   };
 
@@ -205,7 +211,6 @@ export default function DrawingPage({ onDrawingComplete }) {
     
     ctx.lineTo(x, y);
     ctx.stroke();
-    
     lastPosRef.current = { x, y };
   };
 
@@ -224,7 +229,6 @@ export default function DrawingPage({ onDrawingComplete }) {
   };
 
   const handleCompleteDrawing = async () => {
-    console.log('✅ Пользователь завершил рисование');
     await handleTimeUp();
   };
 
@@ -243,28 +247,23 @@ export default function DrawingPage({ onDrawingComplete }) {
     fetchDrawingWord();
   };
 
-  // ✅ ТЕПЕРЬ СРАЗУ ПОКАЗЫВАЕМ ИНТЕРФЕЙС РИСОВАНИЯ
+  const forceCheck = () => {
+    console.log('🔄 Принудительная проверка');
+    fetchDrawingWord();
+  };
 
-  if (error && !currentWord) {
+  // ✅ РЕНДЕРИНГ
+  if (error) {
     return (
       <div className="drawing-container error">
-        <div className="error-icon">🎨</div>
+        <div className="error-icon">❌</div>
         <div className="error-text">{error}</div>
-        <div className="error-details">
-          Комната: {roomCode}<br/>
-          {error.includes("Ожидаем") && "Хост скоро запустит этап рисования"}
-        </div>
         <button className="retry-btn" onClick={retryLoad}>
-          🔄 Обновить
-        </button>
-        <button className="back-btn" onClick={() => navigate('/')}>
-          Вернуться на главную
+          Попробовать снова
         </button>
       </div>
     );
   }
-
-  console.log('✅ Рендерим интерфейс рисования, слово:', currentWord);
 
   return (
     <div className="drawing-container">
@@ -273,14 +272,14 @@ export default function DrawingPage({ onDrawingComplete }) {
           ← Назад
         </button>
         <div className="drawing-title">
-          <h1>🎨 Время рисовать!</h1>
+          <h1>🎨 Рисование</h1>
           <div className="room-info">
-            Комната: {roomCode} | Время: ⏰ {formatTime(timeLeft)}
+            Комната: {roomCode} | {currentWord ? 'Рисуем слово!' : 'Ожидаем слово...'}
           </div>
         </div>
         <div className="timer-section">
           <div className={`timer ${timeLeft <= 10 ? 'urgent' : ''}`}>
-            {formatTime(timeLeft)}
+            ⏰ {formatTime(timeLeft)}
           </div>
         </div>
       </header>
@@ -314,11 +313,7 @@ export default function DrawingPage({ onDrawingComplete }) {
                 >
                   <div 
                     className="brush-preview"
-                    style={{ 
-                      width: size, 
-                      height: size,
-                      backgroundColor: color 
-                    }}
+                    style={{ width: size, height: size, backgroundColor: color }}
                   />
                 </button>
               ))}
@@ -329,26 +324,61 @@ export default function DrawingPage({ onDrawingComplete }) {
             <button className="action-btn clear" onClick={clearCanvas}>
               🗑️ Очистить
             </button>
-            <button 
-              className={`action-btn ${showWord ? 'hide' : 'show'}`}
-              onClick={toggleWordVisibility}
-            >
-              {showWord ? '👁️‍🗨️ Скрыть слово' : '👁️‍🗨️ Показать слово'}
+            <button className="action-btn" onClick={toggleWordVisibility}>
+              {showWord ? '👁️‍🗨️ Скрыть' : '👁️‍🗨️ Показать'}
             </button>
-            <button 
-              className="action-btn complete"
-              onClick={handleCompleteDrawing}
-            >
+            <button className="action-btn complete" onClick={handleCompleteDrawing}>
               ✅ Завершить
             </button>
+            {!currentWord && (
+              <button className="action-btn refresh" onClick={forceCheck}>
+                🔄 Проверить
+              </button>
+            )}
           </div>
+
+          {/* ✅ СТАТУС ОБНОВЛЕНИЯ */}
+          {!currentWord && (
+            <div className="status-info">
+              <div className="status-text">⏳ Ожидаем слово от другого игрока...</div>
+              <div className="status-details">
+                Система случайным образом распределит слова между игроками
+                <br/>
+                Последняя проверка: {new Date(lastUpdate).toLocaleTimeString()}
+                <br/>
+                Авто-обновление каждые 3 секунды
+              </div>
+            </div>
+          )}
+
+          {/* ✅ ИНФОРМАЦИЯ О СИСТЕМЕ */}
+          {currentWord && (
+            <div className="game-rules">
+              <h4>🎯 Правила:</h4>
+              <ul>
+                <li>Вы получили слово, которое придумал другой игрок</li>
+                <li>Автор слова будет раскрыт только в конце раунда</li>
+                <li>Постарайтесь нарисовать так, чтобы угадали!</li>
+              </ul>
+            </div>
+          )}
         </div>
 
         <div className="drawing-area">
           <div className={`word-display ${showWord ? 'visible' : 'hidden'}`}>
-            <div className="word-label">Рисуйте слово:</div>
-            <div className="the-word">{currentWord || "Загрузка..."}</div>
-            <div className="word-hint">(Это слово придумал другой игрок)</div>
+            <div className="word-label">
+              {currentWord ? 'Рисуйте слово:' : 'Слово для рисования:'}
+            </div>
+            <div className="the-word">
+              {currentWord || '⏳ Ожидаем...'}
+            </div>
+            {currentWord && (
+              <div className="word-hint">
+                🎭 <strong>Слово от другого игрока</strong>
+                <br/>
+                <small>Автор будет раскрыт в результатах</small>
+              </div>
+            )}
           </div>
 
           <div className="canvas-container">
@@ -371,7 +401,13 @@ export default function DrawingPage({ onDrawingComplete }) {
                 stopDrawing();
               }}
               className="drawing-canvas"
+              style={{ opacity: currentWord ? 1 : 0.5 }}
             />
+            {!currentWord && (
+              <div className="canvas-overlay">
+                ⏳ Ожидаем распределение слов между игроками...
+              </div>
+            )}
           </div>
         </div>
 
@@ -403,6 +439,16 @@ export default function DrawingPage({ onDrawingComplete }) {
               {60 - timeLeft} из 60 секунд
             </div>
           </div>
+
+          {currentWord && (
+            <div className="word-source">
+              <h4>🎁 Источник слова:</h4>
+              <div className="source-info">
+                <div className="mystery-author">🎭 Анонимный игрок</div>
+                <small>Раскроется в конце раунда</small>
+              </div>
+            </div>
+          )}
 
           <div className="quick-complete">
             <button 
