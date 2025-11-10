@@ -48,7 +48,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     try {
       console.log('🚀 Хост запускает этап рисования...');
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/start-drawing`, {
+      const response = await fetch(`/api/games/${roomCode}/start-drawing`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -77,7 +77,7 @@ export default function DrawingPage({ onDrawingComplete }) {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/words-status`, {
+      const response = await fetch(`/api/games/${roomCode}/words-status`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
