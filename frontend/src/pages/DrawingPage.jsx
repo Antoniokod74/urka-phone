@@ -112,7 +112,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     try {
       console.log('🔄 Получаем слово для рисования...');
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/my-drawing-word`, {
+      const response = await fetch(`/api/games/${roomCode}/my-drawing-word`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -153,7 +153,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     try {
       console.log('🔄 Загрузка данных игры...');
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}`, {
+      const response = await fetch(`/api/games/${roomCode}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -196,7 +196,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     if (!roomCode) return false;
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/save-drawing`, {
+      const response = await fetch(`/api/games/${roomCode}/save-drawing`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -216,7 +216,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     if (!roomCode) return false;
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/finish-drawing`, {
+      const response = await fetch(`/api/games/${roomCode}/finish-drawing`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
