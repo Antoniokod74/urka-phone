@@ -48,7 +48,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     try {
       console.log('🚀 Хост запускает этап рисования...');
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/start-drawing`, { // ← ИСПРАВЛЕНО
+      const response = await fetch(`http://urka-phone.ydns.eu/api/game/${roomCode}/start-drawing`, { // ← ИСПРАВЛЕНО
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -77,7 +77,7 @@ export default function DrawingPage({ onDrawingComplete }) {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/words-status`, { // ← ИСПРАВЛЕНО
+      const response = await fetch(`http://urka-phone.ydns.eu/api/game/${roomCode}/words-status`, { // ← ИСПРАВЛЕНО
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -112,7 +112,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     try {
       console.log('🔄 Получаем слово для рисования...');
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/my-drawing-word`, { // ← ИСПРАВЛЕНО
+      const response = await fetch(`http://urka-phone.ydns.eu/api/game/${roomCode}/my-drawing-word`, { // ← ИСПРАВЛЕНО
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -153,7 +153,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     try {
       console.log('🔄 Загрузка данных игры...');
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}`, { // ← ИСПРАВЛЕНО
+      const response = await fetch(`http://urka-phone.ydns.eu/api/game/${roomCode}`, { // ← ИСПРАВЛЕНО
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -196,7 +196,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     if (!roomCode) return false;
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/save-drawing`, { // ← ИСПРАВЛЕНО
+      const response = await fetch(`http://urka-phone.ydns.eu/api/game/${roomCode}/save-drawing`, { // ← ИСПРАВЛЕНО
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -216,7 +216,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     if (!roomCode) return false;
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/game/${roomCode}/finish-drawing`, { // ← ИСПРАВЛЕНО
+      const response = await fetch(`http://urka-phone.ydns.eu/api/game/${roomCode}/finish-drawing`, {// ← ИСПРАВЛЕНО
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
