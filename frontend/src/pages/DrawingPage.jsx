@@ -166,34 +166,60 @@ export default function DrawingPage({ onDrawingComplete }) {
     }
   }, [saveDrawing, finishDrawing, onDrawingComplete]);
 
-  // ✅ ИНИЦИАЛИЗАЦИЯ CANVAS
+  // ✅ ПРАВИЛЬНАЯ ИНИЦИАЛИЗАЦИЯ CANVAS
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas) {
       const ctx = canvas.getContext('2d');
-      canvas.width = 800;
-      canvas.height = 500;
+      
+      // ✅ Устанавливаем правильные размеры
+      const container = canvas.parentElement;
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+      
+      // ✅ Настраиваем контекст рисования
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = brushSize;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
+      
+      console.log('✅ Canvas инициализирован:', canvas.width, 'x', canvas.height);
     }
   }, []);
 
-  // ✅ ФУНКЦИИ РИСОВАНИЯ
+  // ✅ ОБНОВЛЯЕМ НАСТРОЙКИ КИСТИ ПРИ ИЗМЕНЕНИИ ЦВЕТА И РАЗМЕРА
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.strokeStyle = color;
+      ctx.lineWidth = brushSize;
+    }
+  }, [color, brushSize]);
+
+  // ✅ ФУНКЦИИ РИСОВАНИЯ - ИСПРАВЛЕННЫЕ
+  const getCanvasCoordinates = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
   const startDrawing = (e) => {
     if (!currentWord) return;
     
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const { x, y } = getCanvasCoordinates(e);
     
     lastPosRef.current = { x, y };
-    ctx.strokeStyle = color;
-    ctx.lineWidth = brushSize;
     ctx.beginPath();
     ctx.moveTo(x, y);
     setIsDrawing(true);
@@ -204,10 +230,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const { x, y } = getCanvasCoordinates(e);
     
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -215,6 +238,8 @@ export default function DrawingPage({ onDrawingComplete }) {
   };
 
   const stopDrawing = () => {
+    if (!isDrawing) return;
+    
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     ctx.closePath();
@@ -226,9 +251,16 @@ export default function DrawingPage({ onDrawingComplete }) {
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Восстанавливаем настройки кисти
+    ctx.strokeStyle = color;
+    ctx.lineWidth = brushSize;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
   };
 
   const handleCompleteDrawing = async () => {
+    console.log('✅ Пользователь завершил рисование');
     await handleTimeUp();
   };
 
@@ -297,8 +329,12 @@ export default function DrawingPage({ onDrawingComplete }) {
                   className={`color-btn ${color === colorItem ? 'active' : ''}`}
                   style={{ backgroundColor: colorItem }}
                   onClick={() => setColor(colorItem)}
+                  title={colorItem}
                 />
               ))}
+            </div>
+            <div className="current-color">
+              Текущий: <span className="color-sample" style={{ backgroundColor: color }}></span>
             </div>
           </div>
 
@@ -310,13 +346,22 @@ export default function DrawingPage({ onDrawingComplete }) {
                   key={index}
                   className={`size-btn ${brushSize === size ? 'active' : ''}`}
                   onClick={() => setBrushSize(size)}
+                  title={`Размер ${size}px`}
                 >
                   <div 
                     className="brush-preview"
-                    style={{ width: size, height: size, backgroundColor: color }}
+                    style={{ 
+                      width: Math.max(8, size), 
+                      height: Math.max(8, size),
+                      backgroundColor: color,
+                      borderRadius: '50%'
+                    }}
                   />
                 </button>
               ))}
+            </div>
+            <div className="current-size">
+              Текущий: {brushSize}px
             </div>
           </div>
 
@@ -325,7 +370,7 @@ export default function DrawingPage({ onDrawingComplete }) {
               🗑️ Очистить
             </button>
             <button className="action-btn" onClick={toggleWordVisibility}>
-              {showWord ? '👁️‍🗨️ Скрыть' : '👁️‍🗨️ Показать'}
+              {showWord ? '👁️‍🗨️ Скрыть слово' : '👁️‍🗨️ Показать слово'}
             </button>
             <button className="action-btn complete" onClick={handleCompleteDrawing}>
               ✅ Завершить
@@ -401,11 +446,21 @@ export default function DrawingPage({ onDrawingComplete }) {
                 stopDrawing();
               }}
               className="drawing-canvas"
-              style={{ opacity: currentWord ? 1 : 0.5 }}
+              style={{ 
+                cursor: currentWord ? 'crosshair' : 'not-allowed',
+                border: '2px solid #ddd',
+                borderRadius: '8px',
+                background: '#ffffff',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
+              }}
             />
             {!currentWord && (
               <div className="canvas-overlay">
-                ⏳ Ожидаем распределение слов между игроками...
+                <div className="overlay-content">
+                  ⏳ Ожидаем распределение слов между игроками...
+                  <br/>
+                  <small>Рисование будет доступно когда вы получите слово</small>
+                </div>
               </div>
             )}
           </div>
@@ -440,6 +495,20 @@ export default function DrawingPage({ onDrawingComplete }) {
             </div>
           </div>
 
+          <div className="current-tools">
+            <h4>🎨 Текущие настройки:</h4>
+            <div className="tools-info">
+              <div className="tool-item">
+                <span>Цвет:</span>
+                <span className="color-sample" style={{ backgroundColor: color }}></span>
+              </div>
+              <div className="tool-item">
+                <span>Размер кисти:</span>
+                <span>{brushSize}px</span>
+              </div>
+            </div>
+          </div>
+
           {currentWord && (
             <div className="word-source">
               <h4>🎁 Источник слова:</h4>
@@ -454,6 +523,7 @@ export default function DrawingPage({ onDrawingComplete }) {
             <button 
               className="complete-now-btn"
               onClick={handleCompleteDrawing}
+              disabled={!currentWord}
             >
               🏁 Завершить сейчас
             </button>
