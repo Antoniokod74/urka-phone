@@ -11,6 +11,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import CreateWordsPage from './pages/CreateWordsPage';
 import DrawingPage from './pages/DrawingPage';
 import GuessingPage from './pages/GuessingPage';
+import ResultsPage from './pages/ResultsPage'; // ✅ ДОБАВИЛИ СТРАНИЦУ РЕЗУЛЬТАТОВ
 
 // Компонент для управления навигацией
 function AppContent() {
@@ -94,16 +95,30 @@ function AppContent() {
     navigate(`/room/${roomCode}/drawing`);
   };
 
-  // Обработчик завершения рисования - переходит на страницу угадывания
+  // ✅ ОБНОВЛЕННЫЙ ОБРАБОТЧИК ЗАВЕРШЕНИЯ РИСОВАНИЯ - ПЕРЕХОДИТ НА РЕЗУЛЬТАТЫ
   const handleDrawingComplete = (drawingData, roomCode) => {
-    console.log('🎨 Рисунок завершен:', drawingData);
+    console.log('🎨 Рисунок завершен, переходим к результатам:', drawingData);
     setDrawings(prev => [...prev, {
       id: Date.now(),
       image: drawingData,
       artist: user?.login || 'Игрок',
       originalWord: submittedWords[0] || 'Слово'
     }]);
-    navigate(`/room/${roomCode}/guessing`);
+    
+    // ✅ ПЕРЕХОДИМ НА СТРАНИЦУ РЕЗУЛЬТАТОВ ВМЕСТО УГАДЫВАНИЯ
+    navigate(`/results/${roomCode}`);
+  };
+
+  // ✅ ДОБАВИЛИ ОБРАБОТЧИК ДЛЯ ПЕРЕХОДА НА РЕЗУЛЬТАТЫ ИЗ ДРУГИХ МЕСТ
+  const handleShowResults = (roomCode) => {
+    console.log('📊 Переходим к результатам комнаты:', roomCode);
+    navigate(`/results/${roomCode}`);
+  };
+
+  // ✅ ДОБАВИЛИ ОБРАБОТЧИК ДЛЯ НОВОГО РАУНДА
+  const handleNewRound = (roomCode) => {
+    console.log('🎯 Начинаем новый раунд в комнате:', roomCode);
+    navigate(`/room/${roomCode}/create-words`);
   };
 
   // Обработчик отправки догадки
@@ -147,6 +162,7 @@ function AppContent() {
           <RoomPage
             onBack={() => navigate('/choose-mode')}
             onStartGame={handleStartGame}
+            onShowResults={handleShowResults} // ✅ ДОБАВИЛИ ПЕРЕХОД НА РЕЗУЛЬТАТЫ
           />
         } />
 
@@ -173,6 +189,16 @@ function AppContent() {
             onSubmitGuess={handleSubmitGuess}
             drawings={drawings}
             players={[]}
+            onShowResults={handleShowResults} // ✅ ДОБАВИЛИ ПЕРЕХОД НА РЕЗУЛЬТАТЫ
+          />
+        } />
+
+        {/* ✅ ДОБАВИЛИ МАРШРУТ ДЛЯ СТРАНИЦЫ РЕЗУЛЬТАТОВ */}
+        <Route path="/results/:roomId" element={
+          <ResultsPage
+            onBack={() => navigate(-1)}
+            onNewRound={handleNewRound}
+            onReturnToLobby={() => navigate('/')}
           />
         } />
       </Routes>

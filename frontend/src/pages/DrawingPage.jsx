@@ -18,6 +18,8 @@ export default function DrawingPage({ onDrawingComplete }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [lastUpdate, setLastUpdate] = useState(Date.now());
+  const [drawingStatus, setDrawingStatus] = useState({}); // ✅ Статус рисования всех игроков
+  const [isCompleted, setIsCompleted] = useState(false); // ✅ Завершил ли текущий игрок
   
   const timerRef = useRef(null);
   const isMountedRef = useRef(true);
@@ -34,6 +36,35 @@ export default function DrawingPage({ onDrawingComplete }) {
   ];
 
   const brushSizes = [2, 5, 10, 15, 20];
+
+  // ✅ ПОЛУЧАЕМ СТАТУС РИСОВАНИЯ ВСЕХ ИГРОКОВ
+  const fetchDrawingStatus = useCallback(async () => {
+    if (!roomCode) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://urka-phone.ydns.eu/api/game/${roomCode}/drawing-status`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📊 Статус рисования всех игроков:', data);
+        
+        setDrawingStatus(data);
+
+        // ✅ ПРОВЕРЯЕМ ВСЕ ЛИ ИГРОКИ ЗАВЕРШИЛИ РИСОВАНИЕ
+        if (data.allCompleted) {
+          console.log('🎉 Все игроки завершили рисование! Переходим к результатам...');
+          navigate(`/results/${roomCode}`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Ошибка проверки статуса:', error);
+    }
+  }, [roomCode, navigate]);
 
   // ✅ ПОЛУЧАЕМ СЛОВО ДЛЯ РИСОВАНИЯ (от другого игрока - автор скрыт)
   const fetchDrawingWord = useCallback(async () => {
@@ -78,7 +109,7 @@ export default function DrawingPage({ onDrawingComplete }) {
     }
   }, [roomCode]);
 
-  // ✅ АВТООБНОВЛЕНИЕ
+  // ✅ АВТООБНОВЛЕНИЕ С ПРОВЕРКОЙ СТАТУСА
   useEffect(() => {
     if (!roomCode) return;
 
@@ -88,12 +119,17 @@ export default function DrawingPage({ onDrawingComplete }) {
     // Первая загрузка
     fetchDrawingWord();
 
-    // Интервал для автообновления
-    const interval = setInterval(() => {
-      if (isMountedRef.current && !currentWord) {
-        console.log('🔄 Авто-проверка...');
-        setLastUpdate(Date.now());
-        fetchDrawingWord();
+    // Интервал для автообновления статуса
+    const statusInterval = setInterval(() => {
+      if (isMountedRef.current) {
+        if (!currentWord) {
+          // Если слова еще нет - проверяем слово
+          setLastUpdate(Date.now());
+          fetchDrawingWord();
+        } else if (!isCompleted) {
+          // Если есть слово и не завершили - проверяем статус других игроков
+          fetchDrawingStatus();
+        }
       }
     }, 3000);
 
@@ -111,10 +147,10 @@ export default function DrawingPage({ onDrawingComplete }) {
     return () => {
       console.log('🧹 Очистка таймеров');
       isMountedRef.current = false;
-      clearInterval(interval);
+      clearInterval(statusInterval);
       clearInterval(timer);
     };
-  }, [roomCode, currentWord, fetchDrawingWord]);
+  }, [roomCode, currentWord, isCompleted, fetchDrawingWord, fetchDrawingStatus]);
 
   // ✅ ФУНКЦИИ РИСОВАНИЯ
   const saveDrawing = useCallback(async (drawingData) => {
@@ -129,7 +165,12 @@ export default function DrawingPage({ onDrawingComplete }) {
         },
         body: JSON.stringify({ drawingData })
       });
-      return response.ok;
+      
+      if (response.ok) {
+        console.log('✅ Рисунок сохранен');
+        return true;
+      }
+      return false;
     } catch (error) {
       console.error('❌ Ошибка сохранения:', error);
       return false;
@@ -144,7 +185,13 @@ export default function DrawingPage({ onDrawingComplete }) {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      return response.ok;
+      
+      if (response.ok) {
+        console.log('✅ Рисование завершено');
+        setIsCompleted(true);
+        return true;
+      }
+      return false;
     } catch (error) {
       console.error('❌ Ошибка завершения:', error);
       return false;
@@ -152,7 +199,7 @@ export default function DrawingPage({ onDrawingComplete }) {
   }, [roomCode]);
 
   const handleTimeUp = useCallback(async () => {
-    console.log('🎨 Время вышло');
+    console.log('🎨 Время вышло, сохраняем рисунок...');
     const canvas = canvasRef.current;
     if (!canvas) return;
     
@@ -160,8 +207,11 @@ export default function DrawingPage({ onDrawingComplete }) {
     const saved = await saveDrawing(drawingData);
     if (saved) {
       const finished = await finishDrawing();
-      if (finished && onDrawingComplete) {
-        onDrawingComplete(drawingData);
+      if (finished) {
+        console.log('✅ Рисование завершено, ждем других игроков...');
+        if (onDrawingComplete) {
+          onDrawingComplete(drawingData);
+        }
       }
     }
   }, [saveDrawing, finishDrawing, onDrawingComplete]);
@@ -213,7 +263,7 @@ export default function DrawingPage({ onDrawingComplete }) {
   };
 
   const startDrawing = (e) => {
-    if (!currentWord) return;
+    if (!currentWord || isCompleted) return;
     
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -226,7 +276,7 @@ export default function DrawingPage({ onDrawingComplete }) {
   };
 
   const draw = (e) => {
-    if (!isDrawing || !currentWord) return;
+    if (!isDrawing || !currentWord || isCompleted) return;
     
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -247,6 +297,8 @@ export default function DrawingPage({ onDrawingComplete }) {
   };
 
   const clearCanvas = () => {
+    if (isCompleted) return;
+    
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#FFFFFF';
@@ -260,6 +312,8 @@ export default function DrawingPage({ onDrawingComplete }) {
   };
 
   const handleCompleteDrawing = async () => {
+    if (isCompleted) return;
+    
     console.log('✅ Пользователь завершил рисование');
     await handleTimeUp();
   };
@@ -282,6 +336,31 @@ export default function DrawingPage({ onDrawingComplete }) {
   const forceCheck = () => {
     console.log('🔄 Принудительная проверка');
     fetchDrawingWord();
+    fetchDrawingStatus();
+  };
+
+  // ✅ РЕНДЕРИНГ СТАТУСА ДРУГИХ ИГРОКОВ
+  const renderPlayersStatus = () => {
+    if (!drawingStatus.players || drawingStatus.players.length === 0) return null;
+
+    return (
+      <div className="players-status">
+        <h4>👥 Статус игроков:</h4>
+        <div className="players-list">
+          {drawingStatus.players.map((player, index) => (
+            <div key={index} className="player-status">
+              <span className="player-name">{player.name}</span>
+              <span className={`status-badge ${player.status === 'drawing_completed' ? 'completed' : 'drawing'}`}>
+                {player.status === 'drawing_completed' ? '✅ Завершил' : '🎨 Рисует'}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="completion-info">
+          Завершили: {drawingStatus.completedCount}/{drawingStatus.totalPlayers}
+        </div>
+      </div>
+    );
   };
 
   // ✅ РЕНДЕРИНГ
@@ -292,6 +371,27 @@ export default function DrawingPage({ onDrawingComplete }) {
         <div className="error-text">{error}</div>
         <button className="retry-btn" onClick={retryLoad}>
           Попробовать снова
+        </button>
+      </div>
+    );
+  }
+
+  // ✅ СОСТОЯНИЕ ПОСЛЕ ЗАВЕРШЕНИЯ РИСОВАНИЯ
+  if (isCompleted) {
+    return (
+      <div className="drawing-container completed">
+        <div className="completed-icon">✅</div>
+        <div className="completed-title">Рисование завершено!</div>
+        <div className="completed-text">
+          Ожидаем завершения других игроков...
+          <br/>
+          <small>Автоматический переход к результатам когда все закончат</small>
+        </div>
+        <div className="players-progress">
+          {renderPlayersStatus()}
+        </div>
+        <button className="force-results-btn" onClick={() => navigate(`/results/${roomCode}`)}>
+          🎯 Посмотреть результаты
         </button>
       </div>
     );
@@ -330,6 +430,7 @@ export default function DrawingPage({ onDrawingComplete }) {
                   style={{ backgroundColor: colorItem }}
                   onClick={() => setColor(colorItem)}
                   title={colorItem}
+                  disabled={!currentWord}
                 />
               ))}
             </div>
@@ -347,6 +448,7 @@ export default function DrawingPage({ onDrawingComplete }) {
                   className={`size-btn ${brushSize === size ? 'active' : ''}`}
                   onClick={() => setBrushSize(size)}
                   title={`Размер ${size}px`}
+                  disabled={!currentWord}
                 >
                   <div 
                     className="brush-preview"
@@ -366,13 +468,25 @@ export default function DrawingPage({ onDrawingComplete }) {
           </div>
 
           <div className="actions">
-            <button className="action-btn clear" onClick={clearCanvas}>
+            <button 
+              className="action-btn clear" 
+              onClick={clearCanvas}
+              disabled={!currentWord}
+            >
               🗑️ Очистить
             </button>
-            <button className="action-btn" onClick={toggleWordVisibility}>
+            <button 
+              className="action-btn" 
+              onClick={toggleWordVisibility}
+              disabled={!currentWord}
+            >
               {showWord ? '👁️‍🗨️ Скрыть слово' : '👁️‍🗨️ Показать слово'}
             </button>
-            <button className="action-btn complete" onClick={handleCompleteDrawing}>
+            <button 
+              className="action-btn complete" 
+              onClick={handleCompleteDrawing}
+              disabled={!currentWord}
+            >
               ✅ Завершить
             </button>
             {!currentWord && (
@@ -381,6 +495,9 @@ export default function DrawingPage({ onDrawingComplete }) {
               </button>
             )}
           </div>
+
+          {/* ✅ СТАТУС ДРУГИХ ИГРОКОВ */}
+          {currentWord && renderPlayersStatus()}
 
           {/* ✅ СТАТУС ОБНОВЛЕНИЯ */}
           {!currentWord && (
@@ -451,7 +568,8 @@ export default function DrawingPage({ onDrawingComplete }) {
                 border: '2px solid #ddd',
                 borderRadius: '8px',
                 background: '#ffffff',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
+                boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+                opacity: currentWord ? 1 : 0.5
               }}
             />
             {!currentWord && (
