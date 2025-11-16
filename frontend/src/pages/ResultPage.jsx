@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from '../context/AuthContext';
 import "./ResultsPage.css";
 
-export default function ResultsPage() {
+export default function ResultsPage({ onBack, onNewRound, onReturnToLobby }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { roomId } = useParams();
@@ -76,9 +76,7 @@ export default function ResultsPage() {
         const wordText = playerWord?.phrase || "Слово не найдено";
         
         // Создаем цепочку на основе данных chain или генерируем mock
-        const playerChain = apiData.chain && apiData.chain[index] ? 
-          apiData.chain[index] : 
-          generateMockChain(player.login, wordText);
+        const playerChain = generateMockChain(player.login, wordText);
 
         return {
           id: player.userid || index,
@@ -186,7 +184,11 @@ export default function ResultsPage() {
       });
 
       if (response.ok) {
-        navigate(`/game/${roomCode}`);
+        if (onNewRound) {
+          onNewRound(roomCode);
+        } else {
+          navigate(`/room/${roomCode}/create-words`);
+        }
       } else {
         setError("Не удалось начать новый раунд");
       }
@@ -198,7 +200,11 @@ export default function ResultsPage() {
 
   // ✅ ВЕРНУТЬСЯ В ЛОББИ
   const returnToLobby = () => {
-    navigate('/');
+    if (onReturnToLobby) {
+      onReturnToLobby();
+    } else {
+      navigate('/');
+    }
   };
 
   // ✅ ПЕРЕЗАГРУЗИТЬ РЕЗУЛЬТАТЫ
@@ -262,8 +268,8 @@ export default function ResultsPage() {
     <div className="results-container">
       {/* ✅ ШАПКА */}
       <header className="results-header">
-        <button className="back-button" onClick={returnToLobby}>
-          ← Лобби
+        <button className="back-button" onClick={onBack || (() => navigate(-1))}>
+          ← Назад
         </button>
         <div className="results-title">
           <h1>🎉 Результаты раунда</h1>
